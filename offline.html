@@ -1,20 +1,22 @@
 <!doctype html>
-<html lang="it">
+<html lang="it" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com; object-src 'none'; base-uri 'self'; form-action 'self'">
-  <meta name="theme-color" content="#1565C0">
+  <meta name="theme-color" content="#F2F4F8">
+  <meta name="color-scheme" content="light dark">
   <title>DentalFlow · offline</title>
   <link rel="icon" href="./icons/favicon-32.png" type="image/png">
+  <script src="./js/theme-boot.js"></script>
   <link rel="stylesheet" href="./css/app.css">
 </head>
 <body>
-  <main class="offline-page card">
+  <main class="offline-page">
     <img src="./icons/icon-192.png" alt="" width="96" height="96">
-    <h1>DentalFlow</h1>
-    <p>Sei offline e questa pagina non è disponibile. Riapri DentalFlow quando torni online.</p>
-    <p><a class="btn btn-primary" href="./">Riprova</a></p>
+    <h1>Sei offline</h1>
+    <p>Questa pagina non è disponibile senza rete. I tuoi dati sono al sicuro su questo telefono: riapri DentalFlow quando torni online.</p>
+    <a class="btn btn-primary" href="./">Riprova</a>
   </main>
 </body>
 </html>

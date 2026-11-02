@@ -37,6 +37,32 @@ test('lineChart: zero, un punto, 400 punti; numero serie; etichette X ≤ 12', (
   assert.ok(!esc.includes('<script>') && !esc.includes('<b>'));
 });
 
+test('barChartH: colore per barra (con escape) e ripiego; classi per i colori del tema', () => {
+  const svg = barChartH({ items: [{ label: 'A', value: 5, displayValue: '5', color: 'rgb(10,108,255)' }, { label: 'B', value: 2, displayValue: '2' }] });
+  clean(svg);
+  assert.ok(svg.includes('fill="rgb(10,108,255)"'));
+  assert.ok(svg.includes('fill="#0A6CFF"'), 'ripiego senza colore');
+  assert.ok(svg.includes('class="ch-track"') && svg.includes('class="ch-label"'));
+  const bad = barChartH({ items: [{ label: 'A', value: 1, color: '"><script>' }] });
+  assert.ok(!bad.includes('<script>'));
+  // valore zero: solo il binario, nessuna barra
+  const zero = barChartH({ items: [{ label: 'A', value: 0, displayValue: '0' }] });
+  assert.equal((zero.match(/<rect/g) || []).length, 1);
+});
+
+test('lineChart: area sfumata solo se richiesta, punto finale in evidenza', () => {
+  const base = { labels: ['a', 'b', 'c'], series: [{ name: 'T', values: [1, 3, 2], color: '#0A6CFF' }] };
+  const plain = lineChart(base);
+  assert.ok(!plain.includes('ch-area'));
+  const withArea = lineChart({ ...base, area: true });
+  clean(withArea);
+  assert.ok(withArea.includes('url(#ch-area)'));
+  assert.equal((withArea.match(/r="4.5"/g) || []).length, 1);
+  // serie tratteggiata come prima: nessuna area
+  const dashed = lineChart({ ...base, series: [{ ...base.series[0], dashed: true }], area: true });
+  assert.ok(!dashed.includes('url(#ch-area)'));
+});
+
 test('niceTicks', () => {
   assert.deepEqual(niceTicks(0).ticks, [0, 1]);
   assert.deepEqual(niceTicks(1).ticks, [0, 1]);

@@ -63,3 +63,39 @@ test('backup rifiutati', () => {
 test('parseBackupText su JSON non valido', () => {
   assert.deepEqual(parseBackupText('{'), { ok: false, error: 'File di backup non valido' });
 });
+
+test('backup con calendario, note e incassi: esporta → leggi → importa identico', () => {
+  const store = sample();
+  const [a] = store.getStudios();
+  store.addRule({ studioId: a.id, type: 'monthly-pos', nth: -1, weekday: 5, start: '2026-01-01', end: { type: 'count', count: 6 }, time: { from: '09:00', to: '13:00' } });
+  store.addWorkDays(a.id, ['2026-03-14']);
+  store.setNote('2026-02-13', a.id, 'manca fattura');
+  store.setPaid([{ month: '2026-02', studioId: a.id, paid: true }]);
+  const backup = buildBackup(store.exportData());
+  assert.equal(backup.calendar.rules.length, 1);
+  assert.equal(backup.calendar.days.length, 1);
+  assert.equal(backup.notes.length, 1);
+  assert.equal(backup.payments.length, 1);
+  const res = parseBackupText(JSON.stringify(backup));
+  assert.equal(res.ok, true, res.error);
+  const fresh = makeStore();
+  fresh.replaceAll(res.data);
+  assert.deepEqual(fresh.exportData(), store.exportData());
+});
+
+test('sezioni facoltative non valide: backup rifiutato con messaggio chiaro', () => {
+  const store = sample();
+  const [a] = store.getStudios();
+  store.addRule({ studioId: a.id, type: 'weekly', weekdays: [2], interval: 1, start: '2026-01-01', end: { type: 'never' } });
+  const good = buildBackup(store.exportData());
+  let b = structuredClone(good); b.calendar = [];
+  assert.match(validateBackup(b).error, /calendario/);
+  b = structuredClone(good); b.calendar.rules[0].weekdays = [];
+  assert.match(validateBackup(b).error, /regola del calendario/);
+  b = structuredClone(good); b.notes = [{ id: 'n', date: '2026-02-13', studioId: a.id, text: '', createdAt: 1, updatedAt: 1 }];
+  assert.match(validateBackup(b).error, /nota/);
+  b = structuredClone(good); delete b.calendar;
+  const res = validateBackup(b);
+  assert.equal(res.ok, true);
+  assert.equal(res.data.calendar, undefined);
+});

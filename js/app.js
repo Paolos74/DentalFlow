@@ -2,14 +2,21 @@
 import { createStore } from './store.js';
 import { createSync } from './sync.js';
 import { el } from './ui.js';
+import { readPrefs, writePrefs } from './prefs.js';
+import * as oggi from './views/oggi.js';
 import * as inserisci from './views/inserisci.js';
 import * as registro from './views/registro.js';
 import * as riepilogo from './views/riepilogo.js';
-import * as grafici from './views/grafici.js';
 import * as gestione from './views/gestione.js';
+import * as calendario from './views/calendario.js';
 
-const routes = { inserisci, registro, riepilogo, grafici, gestione };
-const DEFAULT_ROUTE = 'inserisci';
+// Rotte: #oggi, #inserisci, #registro, #recap[/grafici], #altro[/pagina[/id]], #calendario[?studio=id].
+const routes = { oggi, inserisci, registro, recap: riepilogo, altro: gestione, calendario };
+// Indirizzi della prima versione: restano validi (segnalibri, icone installate).
+const LEGACY = { riepilogo: 'recap', grafici: 'recap/grafici', gestione: 'altro' };
+// Scheda evidenziata nella barra per le rotte senza scheda propria.
+const TAB_OF = { calendario: 'altro' };
+const DEFAULT_ROUTE = 'oggi';
 
 // ---------- prompt di installazione (catturato subito, prima di qualunque vista) ----------
 let deferredPrompt = null;
@@ -31,26 +38,83 @@ const install = {
 
 // ---------- store e sync (wrapper: mai metodi del browser passati "nudi") ----------
 const store = createStore({ storage: window.localStorage, now: () => Date.now(), uuid: () => crypto.randomUUID() });
+const prefs = {
+  get: () => readPrefs(window.localStorage),
+  set: (patch) => writePrefs(window.localStorage, patch),
+};
+/** Tema scelto in Altro → Aspetto: data-theme="light" | "dark" | "auto" su <html>. */
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const THEME_COLOR = { light: '#F2F4F8', dark: '#0B0D12' };
+function applyTheme() {
+  const theme = prefs.get().theme;
+  document.documentElement.dataset.theme = theme;
+  const resolved = theme === 'auto' ? (darkQuery.matches ? 'dark' : 'light') : theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[resolved]);
+}
+applyTheme();
+// Automatico: il telefono passa da chiaro a scuro → barra di stato e grafici seguono.
+darkQuery.addEventListener?.('change', () => {
+  if (prefs.get().theme !== 'auto') return;
+  applyTheme();
+  rerender();
+});
 const sync = createSync({ fetch: (...a) => globalThis.fetch(...a), storage: window.localStorage, now: () => Date.now(), store });
 
 navigator.storage?.persist?.().catch(() => {});
+try {
+  store.assignMissingColors(); // studi creati con la prima versione: un colore diverso per ciascuno
+} catch (err) {
+  console.warn('assignMissingColors', err);
+}
 
 const view = document.getElementById('view');
 const navLinks = [...document.querySelectorAll('[data-route]')];
 const loadWarningEl = document.getElementById('load-warning');
 
-function currentRoute() {
+/** Legge l'hash: {route, path, query}; i vecchi indirizzi vengono riscritti con replaceState. */
+function parseHash() {
   const h = location.hash.replace(/^#/, '');
-  return routes[h] ? h : DEFAULT_ROUTE;
+  const qi = h.indexOf('?');
+  const pathPart = qi < 0 ? h : h.slice(0, qi);
+  const query = new URLSearchParams(qi < 0 ? '' : h.slice(qi + 1));
+  let segs = pathPart.split('/').filter(Boolean);
+  if (LEGACY[segs[0]]) {
+    const target = LEGACY[segs[0]];
+    history.replaceState(null, '', `#${target}`);
+    segs = target.split('/');
+  }
+  if (!routes[segs[0]]) return { route: DEFAULT_ROUTE, path: [], query: new URLSearchParams() };
+  return { route: segs[0], path: segs.slice(1), query };
+}
+
+function currentRoute() {
+  return parseHash().route;
 }
 
 const navigate = (route) => { location.hash = `#${route}`; };
 
-const ctx = { store, sync, navigate, install, rerender: () => rerender() };
+// Parametri passati alla vista successiva (es. data e studio per Inserisci), letti una sola volta.
+let pendingParams = null;
+function go(route, params = null) {
+  pendingParams = params;
+  if (location.hash === `#${route}`) renderView({ resetScroll: true });
+  else location.hash = `#${route}`;
+}
+function takeParams() {
+  const p = pendingParams;
+  pendingParams = null;
+  return p;
+}
+
+const ctx = {
+  store, sync, navigate, go, takeParams, install, prefs, applyTheme, path: [], query: new URLSearchParams(), entered: false,
+  rerender: () => rerender(),
+};
 
 function updateChrome(route) {
+  const tab = TAB_OF[route] || route;
   for (const a of navLinks) {
-    const active = a.dataset.route === route;
+    const active = a.dataset.route === tab;
     a.classList.toggle('active', active);
     if (active) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
@@ -61,8 +125,11 @@ function updateChrome(route) {
 }
 
 /** Renderizza la vista corrente mantenendo focus, cursore e scroll. */
-function renderView({ resetScroll = false } = {}) {
-  const route = currentRoute();
+function renderView({ resetScroll = false, entered = resetScroll } = {}) {
+  const { route, path, query } = parseHash();
+  ctx.path = path;
+  ctx.query = query;
+  ctx.entered = entered; // true entrando nella schermata o riaprendo l'app; false nei ridisegni
   const active = document.activeElement;
   let focusId = null;
   let sel = null;
@@ -76,7 +143,7 @@ function renderView({ resetScroll = false } = {}) {
     routes[route].render(view, ctx);
   } catch (err) {
     console.error(err);
-    view.replaceChildren(el('p', { class: 'field-error', text: `Errore nella visualizzazione: ${err.message}` }));
+    view.replaceChildren(el('p', { class: 'field-error card', text: `Errore nella visualizzazione: ${err.message}` }));
   }
   if (focusId) {
     const target = document.getElementById(focusId);
@@ -88,6 +155,23 @@ function renderView({ resetScroll = false } = {}) {
     }
   }
   window.scrollTo(0, resetScroll ? 0 : scrollY);
+  watchLargeTitle();
+}
+
+// ---------- barra superiore compatta (titolo piccolo quando il titolo grande esce dallo schermo) ----------
+const topbar = document.getElementById('topbar');
+const topbarTitle = document.getElementById('topbar-title');
+let titleObserver = null;
+function watchLargeTitle() {
+  titleObserver?.disconnect();
+  const title = view.querySelector('.large-title');
+  topbarTitle.textContent = title ? title.textContent : '';
+  topbar.classList.remove('is-visible');
+  if (!title || !('IntersectionObserver' in window)) return;
+  titleObserver = new IntersectionObserver(([entry]) => {
+    topbar.classList.toggle('is-visible', !entry.isIntersecting && entry.boundingClientRect.top < 44);
+  }, { rootMargin: '-44px 0px 0px 0px' });
+  titleObserver.observe(title);
 }
 
 function rerender() {
@@ -99,7 +183,7 @@ function rerender() {
 let syncTimer = null;
 function runSync() {
   if (!sync.isEnabled() || !navigator.onLine) return;
-  sync.syncNow().then(() => { if (currentRoute() === 'gestione') rerender(); });
+  sync.syncNow().then(() => { if (currentRoute() === 'altro') rerender(); });
 }
 
 store.subscribe(({ source }) => {
@@ -114,7 +198,7 @@ addEventListener('hashchange', () => renderView({ resetScroll: true }));
 
 // Altri tab: ricarica i dati quando cambiano altrove.
 addEventListener('storage', (event) => {
-  if (event.key === 'dentalflow:data') {
+  if (event.key === 'dentalflow:data' || event.key === 'dentalflow:calendar') {
     store.reloadFromStorage(); // emette {source:'remote'} → re-render
     try {
       sync.ensureTracking();
@@ -123,6 +207,9 @@ addEventListener('storage', (event) => {
     }
   } else if (event.key === 'dentalflow:sync') {
     rerender();
+  } else if (event.key === 'dentalflow:prefs') {
+    applyTheme();
+    rerender();
   }
 });
 
@@ -130,13 +217,20 @@ addEventListener('storage', (event) => {
 const offlineBadge = document.getElementById('offline-badge');
 function updateOnline() {
   offlineBadge.hidden = navigator.onLine;
+  // la pillola visibile è nella riga del titolo di ogni schermata (nessuno spostamento della pagina)
+  document.documentElement.classList.toggle('is-offline', !navigator.onLine);
 }
 addEventListener('online', () => { updateOnline(); runSync(); });
 addEventListener('offline', updateOnline);
 updateOnline();
 
+// App tornata in primo piano (es. riaperta il giorno dopo): la vista la tratta come un ingresso.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && firstRenderDone) renderView({ entered: true });
+});
+
 // ---------- primo render ----------
-renderView();
+renderView({ entered: true });
 firstRenderDone = true;
 try {
   sync.ensureTracking();

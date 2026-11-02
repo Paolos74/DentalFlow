@@ -1,5 +1,5 @@
 // Service worker di DentalFlow. Aumenta VERSION a ogni rilascio: comparirà il banner "Aggiorna".
-const VERSION = 'dentalflow-v1';
+const VERSION = 'dentalflow-v6';
 
 const ASSETS = [
   './',
@@ -18,11 +18,19 @@ const ASSETS = [
   'js/backup.js',
   'js/charts.js',
   'js/sync.js',
+  'js/calendar.js',
+  'js/ics.js',
+  'js/colors.js',
+  'js/prefs.js',
+  'js/icons.js',
+  'js/theme-boot.js',
+  'js/views/oggi.js',
   'js/views/inserisci.js',
   'js/views/registro.js',
   'js/views/riepilogo.js',
   'js/views/grafici.js',
   'js/views/gestione.js',
+  'js/views/calendario.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/icon-maskable-512.png',

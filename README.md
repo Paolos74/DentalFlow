@@ -8,15 +8,19 @@ Sito statico in HTML, CSS e JavaScript, senza build e senza librerie esterne.
 
 | Sezione | Cosa fa |
 |---|---|
-| **Gestione → Studi** | Aggiungi, rinomina, archivia/ripristina ed elimina gli studi in cui lavori. Se uno studio ha inserimenti puoi scegliere **Archivia** (i dati restano) oppure **Elimina definitivamente** (con doppia conferma). |
-| **Gestione → Trattamenti** | Crei i tipi di trattamento e scegli subito **in quali studi** offrirli (anche più studi insieme). Puoi aggiungerli ad altri studi, rimuoverli da più studi, archiviarli/ripristinarli, rinominarli o eliminarli. |
-| **Inserisci** | Scegli giorno e studio. Per ogni trattamento attivo indichi il numero di pazienti e l'**importo totale** incassato (es. 13/02/2026, Igiene dentale, 7 pazienti, 210 €). |
-| **Registro** | Elenco di tutti gli inserimenti con filtri. Ogni inserimento è modificabile in ogni campo (data, studio, trattamento, pazienti, importo) ed eliminabile. |
-| **Riepilogo** | Per un singolo studio o per tutti: quanti e quali trattamenti, pazienti e totale in euro, percentuali, totali per studio. Periodo: questo mese, mese scorso, quest'anno, tutto o personalizzato. |
-| **Riepilogo → Esporta CSV** | Per un singolo studio, nel periodo scelto: colonne `Data;Trattamento;Numero pazienti;Costo trattamento (€)`, formato pronto per Excel in italiano (separatore `;`, date `GG/MM/AAAA`, virgola decimale). |
-| **Grafici** | Quale trattamento pesa di più (euro o pazienti) e andamento nel tempo, totale o per trattamento, per tutti gli studi o per uno solo. Raggruppamento per giorno, settimana, mese o anno, utile per vedere la stagionalità. |
-| **Gestione → Backup** | Esporta e importa tutti i dati in un file JSON. |
-| **Gestione → Sincronizzazione** | Facoltativa, con Firebase gratuito (vedi sotto). Disattivata finché non la configuri. |
+| **Oggi** | Schermata iniziale: saluto, recap del mese (incasso, pazienti, giorni, confronto con lo stesso punto del mese scorso, trattamenti principali), in quale studio lavori oggi con "Inserisci la giornata", azioni rapide, giorni **da compilare** (previsti dal calendario negli ultimi 30 giorni e senza dati: un tocco apre Inserisci, ⋯ → "Non ho lavorato"; le prime 3 e poi "Mostra tutti"), prossimi giorni di lavoro, promemoria backup. |
+| **Inserisci** | Data con scorciatoie Oggi / Ieri e frecce, studio con un tocco. Lo studio previsto dal calendario è già selezionato ("da calendario"); se il giorno non è nel calendario scegli tu lo studio. Una riga per trattamento: pazienti con − / +, e appena sono più di 0 compare l'**importo totale** (es. 13/02/2026, Igiene dentale, 7 pazienti, 210 €). Una giornata già registrata si riapre con i valori salvati e si modifica; "+ Altra riga" per una seconda riga dello stesso trattamento; "Aggiungi un trattamento" (a questo studio) senza uscire. Nota facoltativa sulla giornata. Entrando nella schermata o riaprendo l'app, se la data non è stata scelta oggi torna a oggi, ma solo se non ci sono valori non salvati. |
+| **Registro** | Vista **Elenco** per giornata (data, studio, totale, nota) e vista **Mese** con i giorni registrati, il segno rosso sui giorni previsti senza dati e la nota. Ogni inserimento è modificabile in ogni campo ed eliminabile; "Modifica giornata" sposta o elimina un'intera giornata. Dopo un'eliminazione c'è **Annulla**. |
+| **Recap → Numeri** | Periodo a frecce (mese, anno, tutto, personalizzato), uno studio o tutti: incasso, pazienti, giorni lavorati, medie per paziente e per giornata con confronto col periodo precedente; card **Da incassare** calcolata su tutti i mesi con inserimenti fino a oggi, qualunque sia il periodo mostrato (totale e mesi non pagati per studio); una riga per studio con quota e da incassare (toccandola: CSV del periodo, Incassi, solo questo studio); foglio **Incassi** di uno studio con tutti i suoi mesi, prima quelli da incassare e poi quelli pagati; trattamenti; giornate previste e mancanti; "Il tuo anno". |
+| **Recap → Esporta CSV** | Scegli il periodo (di base il mese scorso) e **i singoli studi**: un file per studio con colonne `Data`, `Trattamento`, `Numero pazienti`, `Costo trattamento (€)`, date `GG/MM/AAAA` e virgola decimale. Facoltativo: un CSV unico di tutti gli studi con la colonna `Studio`. Due formati: *virgola* (Numbers, Google Fogli, anteprima dell'iPhone) ed *Excel in italiano* (punto e virgola, da scegliere per i file da aprire con Excel sul computer); il foglio lo ricorda accanto alla scelta. Con un solo file il download parte subito; con più file si apre il foglio **File CSV pronti**, con *Scarica* e *Condividi* per ogni file e *Condividi tutti* dove il telefono lo permette. |
+| **Recap → Grafici** | Peso dei trattamenti (incasso, pazienti o €/paziente, scelti tra i filtri) e andamento nel tempo totale, per trattamento o **per studio**, con il confronto con l'anno prima per vedere la stagionalità. Raggruppamento per giorno, settimana, mese o anno. |
+| **Altro → Calendario di lavoro** | Ripetizioni per studio: ogni settimana (anche ogni N settimane), ogni mese per data o per posizione (es. il primo lunedì), ogni anno; fine mai, fino a una data o dopo N volte; orario facoltativo. Giorni singoli, anche più giorni insieme; ogni giorno singolo si modifica (studio, data, orario) o si elimina toccandolo nella lista o dal pannello del giorno. Non si può spostare su uno studio archiviato né su una data in cui lo stesso studio ha già un giorno singolo. "Togli questo giorno" per un giorno in cui non lavori. Menu ⋯ → esportazione `.ics` per il calendario del telefono. |
+| **Altro → Studi / Trattamenti** | Studi con colore, giorni di lavoro e trattamenti offerti (Offerto / Archiviato / Non offerto). **Archivia** (i dati restano) oppure **Elimina definitivamente** (con doppia conferma). |
+| **Altro → Backup e ripristino** | Esporta e importa tutti i dati (calendario, note e incassi compresi) in un file JSON. Prima di un'importazione l'app salva una copia dei dati attuali, ripristinabile; quando non serve più, **Elimina la copia** la cancella. |
+| **Altro → Sincronizzazione** | Facoltativa, con Firebase gratuito (vedi sotto). Disattivata finché non la configuri. |
+| **Altro → Aspetto** | Tema Automatico, Chiaro o Scuro. |
+
+I vecchi indirizzi (`#riepilogo`, `#grafici`, `#gestione`) portano alle nuove sezioni.
 
 Gli importi sono gestiti in centesimi interi, così i totali sono sempre esatti.
 
@@ -34,7 +38,7 @@ Tutti i percorsi dell'app sono relativi, quindi funziona anche dentro la sotto-c
 
 ## Installare l'app
 
-- **Android / Chrome (anche desktop)**: apri il sito, poi *Gestione → Installa app* oppure il menu del browser → *Installa app* / *Aggiungi a schermata Home*.
+- **Android / Chrome (anche desktop)**: apri il sito, poi *Altro → Installa app* oppure il menu del browser → *Installa app* / *Aggiungi a schermata Home*.
 - **iPhone / iPad (Safari)**: pulsante *Condividi* → *Aggiungi alla schermata Home*.
 
 L'app installata si apre a schermo intero, come un'app normale.
@@ -49,12 +53,14 @@ I dati sono sempre salvati sul dispositivo, quindi puoi inserire anche senza con
 
 ## Aggiornamenti
 
-Quando pubblichi una nuova versione, cambia la riga `const VERSION = 'dentalflow-v1';` in `sw.js` (es. `dentalflow-v2`). Al prossimo avvio l'app mostra il banner **"È disponibile una nuova versione"**. Il pulsante **Aggiorna** carica la nuova versione. L'app non si ricarica mai da sola, così non perdi un inserimento a metà.
+Quando pubblichi una nuova versione, cambia la riga `const VERSION = 'dentalflow-v6';` in `sw.js` (es. `dentalflow-v7`). Al prossimo avvio l'app mostra l'avviso **"Nuova versione"** sopra la barra delle schede. Il pulsante **Aggiorna** carica la nuova versione. L'app non si ricarica mai da sola, così non perdi un inserimento a metà.
 
 ## Backup
 
-- *Gestione → Backup → Esporta backup* scarica `DentalFlow-backup-AAAA-MM-GG.json`.
-- *Importa backup* sostituisce tutti i dati attuali con quelli del file, dopo una conferma.
+- *Altro → Backup e ripristino → Esporta backup* scarica `DentalFlow-backup-AAAA-MM-GG.json`.
+- *Importa backup* sostituisce tutti i dati attuali con quelli del file, dopo una conferma. Un backup della prima versione (senza calendario) lascia il calendario com'è.
+- Dopo un'importazione la copia dei dati di prima resta in *Backup e ripristino*: **Ripristina la copia di prima** la rimette, **Elimina la copia** la cancella.
+- Se l'ultimo backup ha più di 14 giorni e hai modificato i dati, la schermata Oggi te lo ricorda.
 - I dati vivono nel browser del dispositivo: se cancelli i dati del sito o disinstalli il browser, si perdono. **Esporta un backup regolarmente** (ad esempio ogni mese) e conservalo, per esempio nel cloud o via email.
 
 ## Sincronizzazione con Firebase (gratuita, facoltativa)
@@ -81,7 +87,7 @@ Serve solo se vuoi gli stessi dati su più dispositivi. Usa il piano gratuito **
 
 5. Facoltativo: in Google Cloud Console → *API e servizi → Credenziali*, limita la chiave API ai referrer `https://<utente>.github.io/*`.
 6. Facoltativo: nelle impostazioni di Authentication disattiva la creazione di nuovi utenti, se l'opzione è disponibile.
-7. Nell'app: *Gestione → Sincronizzazione online* → incolla API key e Project ID, inserisci email e password → **Accedi e sincronizza**. Ripeti sugli altri dispositivi con gli stessi dati.
+7. Nell'app: *Altro → Sincronizzazione* → incolla API key e Project ID, inserisci email e password → **Accedi e sincronizza**. Ripeti sugli altri dispositivi con gli stessi dati.
 
 Note:
 - Quote gratuite: vedi [firebase.google.com/pricing](https://firebase.google.com/pricing) e [firebase.google.com/docs/firestore/pricing](https://firebase.google.com/docs/firestore/pricing). L'uso di una sola persona resta molto sotto i limiti gratuiti.

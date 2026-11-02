@@ -1,5 +1,10 @@
 // Modello dati, validazione, CRUD e persistenza su localStorage (adapter iniettabile).
+// 'dentalflow:data' resta identico alla versione 1 (studi, trattamenti, inserimenti, tracking).
+// Calendario, note delle giornate e incassi stanno in 'dentalflow:calendar': una versione vecchia
+// dell'app li ignora e, salvando, non li cancella.
 import { isValidISODate } from './dates.js';
+import { ruleError, dayError, occurrences } from './calendar.js';
+import { COLOR_KEYS, nextStudioColor } from './colors.js';
 
 export class ValidationError extends Error {
   constructor(message) {
@@ -17,8 +22,12 @@ export class StorageError extends Error {
 
 export const DATA_KEY = 'dentalflow:data';
 export const CORRUPT_PREFIX = 'dentalflow:data:corrupt-';
+export const CAL_KEY = 'dentalflow:calendar';
+export const CAL_CORRUPT_PREFIX = 'dentalflow:calendar:corrupt-';
 export const MAX_CENTS = 10000000;
-export const KINDS = ['studio', 'treatment', 'entry'];
+export const MAX_NOTE = 1000;
+export const KINDS = ['studio', 'treatment', 'entry', 'rule', 'day', 'note', 'payment'];
+const CAL_ARRAYS = ['rules', 'days', 'notes', 'payments'];
 
 export const MSG = {
   name: 'Il nome deve avere da 1 a 60 caratteri',
@@ -38,17 +47,39 @@ export const MSG = {
   quota: 'Impossibile salvare: spazio del browser esaurito o non disponibile. Esporta un backup.',
   corrupt: 'Dati locali illeggibili: è stata salvata una copia. Importa un backup.',
   readOnly: 'Dati locali illeggibili e impossibili da copiare: esporta o importa un backup prima di continuare',
+  calCorrupt: 'Calendario locale illeggibile: è stata salvata una copia. Importa un backup.',
+  color: 'Colore non valido',
+  note: `La nota può avere al massimo ${MAX_NOTE} caratteri`,
+  month: 'Mese non valido',
+  ruleNotFound: 'Regola del calendario non trovata',
+  dayNotFound: 'Giorno del calendario non trovato',
+  dayDuplicate: 'In quella data lo studio ha già un giorno singolo nel calendario',
+  noDay: 'Nessun inserimento in questa giornata',
+  notAssociatedTarget: (name) => `Il trattamento «${name}» non è associato allo studio scelto`,
 };
 
-const ARRAY_OF = { studio: 'studios', treatment: 'treatments', entry: 'entries' };
+const ARRAY_OF = {
+  studio: 'studios', treatment: 'treatments', entry: 'entries', rule: 'rules', day: 'days', note: 'notes', payment: 'payments',
+};
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+export const noteId = (date, studioId) => `${date}_${studioId}`;
+export const paymentId = (month, studioId) => `${month}_${studioId}`;
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isTs = (v) => Number.isSafeInteger(v) && v >= 0;
 const byName = (a, b) => a.name.localeCompare(b.name, 'it') || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 function emptyState() {
-  return { schemaVersion: 1, studios: [], treatments: [], entries: [], tracking: { enabled: false, dirty: [] } };
+  return {
+    schemaVersion: 1, studios: [], treatments: [], entries: [], tracking: { enabled: false, dirty: [] },
+    rules: [], days: [], notes: [], payments: [],
+  };
 }
+
+const serializeData = (s) => JSON.stringify({
+  schemaVersion: 1, studios: s.studios, treatments: s.treatments, entries: s.entries, tracking: s.tracking,
+});
+const serializeCal = (s) => JSON.stringify({ version: 1, rules: s.rules, days: s.days, notes: s.notes, payments: s.payments });
 
 function nameError(name) {
   if (typeof name !== 'string') return MSG.name;
@@ -69,6 +100,7 @@ export function validateRecord(kind, r) {
     const e = nameError(r.name);
     if (e) return e;
     if (typeof r.archived !== 'boolean') return 'Campo "archiviato" non valido';
+    if (r.color !== undefined && !COLOR_KEYS.includes(r.color)) return MSG.color;
     return null;
   }
   if (kind === 'treatment') {
@@ -88,6 +120,20 @@ export function validateRecord(kind, r) {
     if (!Number.isInteger(r.amountCents) || r.amountCents < 0 || r.amountCents > MAX_CENTS) return MSG.amount;
     return null;
   }
+  if (kind === 'rule') return ruleError(r);
+  if (kind === 'day') return dayError(r);
+  if (kind === 'note') {
+    if (!isValidISODate(r.date)) return MSG.date;
+    if (typeof r.studioId !== 'string' || r.studioId === '') return 'Studio non valido';
+    if (typeof r.text !== 'string' || r.text.trim() === '' || r.text.length > MAX_NOTE) return MSG.note;
+    return null;
+  }
+  if (kind === 'payment') {
+    if (typeof r.month !== 'string' || !MONTH_RE.test(r.month)) return MSG.month;
+    if (typeof r.studioId !== 'string' || r.studioId === '') return 'Studio non valido';
+    if (typeof r.paid !== 'boolean') return 'Stato del pagamento non valido';
+    return null;
+  }
   return 'Tipo di record sconosciuto';
 }
 
@@ -99,6 +145,7 @@ function isValidState(s) {
 function normalizeLoaded(s) {
   const t = isObj(s.tracking) ? s.tracking : {};
   return {
+    ...emptyState(),
     schemaVersion: 1,
     studios: s.studios,
     treatments: s.treatments,
@@ -121,11 +168,26 @@ export function createStore(deps) {
   let state = emptyState();
   let readOnly = false;
   let loadWarning = null;
+  // Contenuto di 'dentalflow:calendar': calDisk = stringa su disco (null se assente), calSaved = ultimo stato salvato.
+  let calDisk = null;
+  let calSaved = serializeCal(emptyState());
   const subscribers = new Set();
 
-  function load() {
-    readOnly = false;
-    loadWarning = null;
+  /** Copia un valore illeggibile sotto prefix+timestamp (una sola volta). false se non si può copiare. */
+  function keepCorruptCopy(prefix, raw) {
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i);
+      if (k && k.startsWith(prefix) && storage.getItem(k) === raw) return true;
+    }
+    try {
+      storage.setItem(prefix + now(), raw);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function loadData() {
     let raw = null;
     try {
       raw = storage.getItem(DATA_KEY);
@@ -147,24 +209,51 @@ export function createStore(deps) {
       return;
     }
     state = emptyState();
-    let exists = false;
-    for (let i = 0; i < storage.length; i++) {
-      const k = storage.key(i);
-      if (k && k.startsWith(CORRUPT_PREFIX) && storage.getItem(k) === raw) {
-        exists = true;
-        break;
-      }
-    }
-    if (!exists) {
-      try {
-        storage.setItem(CORRUPT_PREFIX + now(), raw);
-      } catch {
-        readOnly = true;
-        loadWarning = MSG.readOnly;
-        return;
-      }
+    if (!keepCorruptCopy(CORRUPT_PREFIX, raw)) {
+      readOnly = true;
+      loadWarning = MSG.readOnly;
+      return;
     }
     loadWarning = MSG.corrupt;
+  }
+
+  function loadCal() {
+    let raw = null;
+    try {
+      raw = storage.getItem(CAL_KEY);
+    } catch {
+      raw = null;
+    }
+    calDisk = raw ?? null;
+    if (raw === null || raw === undefined) {
+      calSaved = serializeCal(state);
+      return;
+    }
+    let parsed = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+    if (isObj(parsed) && CAL_ARRAYS.every((a) => parsed[a] === undefined || Array.isArray(parsed[a]))) {
+      for (const a of CAL_ARRAYS) state[a] = (parsed[a] || []).filter(isObj);
+      calSaved = serializeCal(state);
+      return;
+    }
+    calSaved = null; // al primo salvataggio il calendario viene riscritto (la copia è già salvata)
+    if (!keepCorruptCopy(CAL_CORRUPT_PREFIX, raw)) {
+      readOnly = true;
+      loadWarning = MSG.readOnly;
+      return;
+    }
+    if (!readOnly) loadWarning = loadWarning ? `${loadWarning} ${MSG.calCorrupt}` : MSG.calCorrupt;
+  }
+
+  function load() {
+    readOnly = false;
+    loadWarning = null;
+    loadData();
+    loadCal();
   }
 
   function notify(source) {
@@ -181,15 +270,32 @@ export function createStore(deps) {
   function commit(next, { emit = true, source = 'local', allowReadOnly = false } = {}) {
     if (readOnly && !allowReadOnly) throw new StorageError(MSG.readOnly);
     if (!next.tracking.enabled) {
-      next.studios = next.studios.filter((r) => !r.deleted);
-      next.treatments = next.treatments.filter((r) => !r.deleted);
-      next.entries = next.entries.filter((r) => !r.deleted);
+      for (const arr of Object.values(ARRAY_OF)) next[arr] = next[arr].filter((r) => !r.deleted);
       next.tracking.dirty = [];
     }
+    const calStr = serializeCal(next);
+    const calChanged = calStr !== calSaved;
+    if (calChanged) {
+      try {
+        storage.setItem(CAL_KEY, calStr);
+      } catch {
+        throw new StorageError(MSG.quota);
+      }
+    }
     try {
-      storage.setItem(DATA_KEY, JSON.stringify(next));
+      storage.setItem(DATA_KEY, serializeData(next));
     } catch {
+      if (calChanged) {
+        try {
+          if (calDisk === null) storage.removeItem(CAL_KEY);
+          else storage.setItem(CAL_KEY, calDisk);
+        } catch { /* il calendario resta quello nuovo: lo stato in memoria non cambia */ }
+      }
       throw new StorageError(MSG.quota);
+    }
+    if (calChanged) {
+      calSaved = calStr;
+      calDisk = calStr;
     }
     state = next;
     if (emit) notify(source);
@@ -251,6 +357,50 @@ export function createStore(deps) {
   }
 
   const copyRec = (r) => structuredClone(r);
+  const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && o[k] !== undefined).map((k) => [k, o[k]]));
+
+  /** Crea o aggiorna (anche riportando in vita un record eliminato) un record con id deterministico. */
+  function upsert(next, kind, id, fields) {
+    const arr = next[ARRAY_OF[kind]];
+    const rec = arr.find((r) => r.id === id);
+    if (rec) {
+      const same = !rec.deleted && Object.entries(fields).every(([k, v]) => rec[k] === v);
+      if (same) return;
+      Object.assign(rec, fields, { deleted: false });
+      touch(next, kind, rec);
+      return;
+    }
+    const t = now();
+    const created = { id, ...fields, createdAt: t, updatedAt: t, deleted: false };
+    arr.push(created);
+    markDirty(next, kind, id);
+  }
+
+  function upsertNote(next, date, studioId, text) {
+    const clean = String(text ?? '').trim();
+    if (clean.length > MAX_NOTE) throw new ValidationError(MSG.note);
+    const id = noteId(date, studioId);
+    if (clean === '') {
+      const n = findLive(next.notes, id);
+      if (n) tombstone(next, 'note', n);
+      return;
+    }
+    upsert(next, 'note', id, { date, studioId, text: clean });
+  }
+
+  function ruleFields(i) {
+    const end = i.end?.type === 'until' ? { type: 'until', date: i.end.date }
+      : i.end?.type === 'count' ? { type: 'count', count: i.end.count } : { type: 'never' };
+    const time = i.time && (i.time.from || i.time.to) ? { from: i.time.from, to: i.time.to } : null;
+    const base = { studioId: i.studioId, type: i.type, start: i.start, end, time };
+    if (i.type === 'weekly') {
+      base.weekdays = Array.isArray(i.weekdays) ? [...new Set(i.weekdays)].sort((a, b) => a - b) : i.weekdays;
+      base.interval = i.interval ?? 1;
+    } else if (i.type === 'monthly-date') base.monthDay = i.monthDay;
+    else if (i.type === 'monthly-pos') Object.assign(base, { nth: i.nth, weekday: i.weekday });
+    else if (i.type === 'yearly') Object.assign(base, { month: i.month, day: i.day });
+    return base;
+  }
 
   // ---------- rimozione trattamento (blocchi interni su bozza) ----------
   function archiveIn(next, t, ids) {
@@ -339,7 +489,9 @@ export function createStore(deps) {
       return mutate((next) => {
         checkUnique(next.studios, n, null, MSG.dupStudio);
         const t = now();
-        const rec = { id: uuid(), name: n, archived: false, createdAt: t, updatedAt: t, deleted: false };
+        const rec = {
+          id: uuid(), name: n, archived: false, color: nextStudioColor(live(next.studios)), createdAt: t, updatedAt: t, deleted: false,
+        };
         next.studios.push(rec);
         markDirty(next, 'studio', rec.id);
         return rec.id;
@@ -377,6 +529,9 @@ export function createStore(deps) {
         if (!s) throw new ValidationError(MSG.studioNotFound);
         tombstone(next, 'studio', s);
         for (const e of next.entries) if (!e.deleted && e.studioId === id) tombstone(next, 'entry', e);
+        for (const [kind, arr] of [['rule', 'rules'], ['day', 'days'], ['note', 'notes'], ['payment', 'payments']]) {
+          for (const r of next[arr]) if (!r.deleted && r.studioId === id) tombstone(next, kind, r);
+        }
         for (const t of next.treatments) {
           if (t.deleted || !(id in t.studios)) continue;
           delete t.studios[id];
@@ -501,12 +656,333 @@ export function createStore(deps) {
         touch(next, 'entry', e);
       });
     },
+    /** Elimina un inserimento; ritorna la copia per "Annulla" ([{kind, data}]). */
     deleteEntry(id) {
-      mutate((next) => {
+      return mutate((next) => {
         const e = findLive(next.entries, id);
         if (!e) throw new ValidationError(MSG.entryNotFound);
+        const copy = copyRec(e);
         tombstone(next, 'entry', e);
+        return [{ kind: 'entry', data: copy }];
       });
+    },
+
+    /**
+     * Salva una giornata (data + studio) in un'unica operazione.
+     * rows: [{id?, treatmentId, patients, amountCents}] (con id = modifica, senza = nuova riga);
+     * deleteIds: inserimenti da eliminare; note: testo della nota ('' = elimina, undefined = invariata).
+     */
+    saveDay({ date, studioId, rows = [], deleteIds = [], note } = {}) {
+      if (!isValidISODate(date)) throw new ValidationError(MSG.date);
+      return mutate((next) => {
+        const s = findLive(next.studios, studioId);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        const t0 = now();
+        const res = { added: [], updated: 0, deleted: 0 };
+        for (const row of rows) {
+          const fields = { date, patients: row.patients, amountCents: row.amountCents };
+          const err = entryFieldsError(fields);
+          if (err) throw new ValidationError(err);
+          if (row.id) {
+            const e = findLive(next.entries, row.id);
+            if (!e || e.date !== date || e.studioId !== studioId) throw new ValidationError(MSG.entryNotFound);
+            if (e.patients === row.patients && e.amountCents === row.amountCents) continue;
+            e.patients = row.patients;
+            e.amountCents = row.amountCents;
+            touch(next, 'entry', e);
+            res.updated += 1;
+          } else {
+            if (s.archived) throw new ValidationError(MSG.studioUnavailable);
+            const t = findLive(next.treatments, row.treatmentId);
+            if (!t || t.studios[studioId] !== 'active') throw new ValidationError(MSG.treatmentInactive);
+            const rec = {
+              id: uuid(), date, studioId, treatmentId: row.treatmentId, patients: row.patients, amountCents: row.amountCents,
+              createdAt: t0, updatedAt: t0, deleted: false,
+            };
+            next.entries.push(rec);
+            markDirty(next, 'entry', rec.id);
+            res.added.push(rec.id);
+          }
+        }
+        for (const id of deleteIds) {
+          const e = findLive(next.entries, id);
+          if (!e || e.date !== date || e.studioId !== studioId) throw new ValidationError(MSG.entryNotFound);
+          tombstone(next, 'entry', e);
+          res.deleted += 1;
+        }
+        if (note !== undefined) upsertNote(next, date, studioId, note);
+        return res;
+      });
+    },
+
+    /** Elimina tutti gli inserimenti (e la nota) di una giornata; ritorna le copie per "Annulla". */
+    deleteDayEntries(date, studioId) {
+      return mutate((next) => {
+        const removed = [];
+        for (const e of next.entries) {
+          if (e.deleted || e.date !== date || e.studioId !== studioId) continue;
+          removed.push({ kind: 'entry', data: copyRec(e) });
+          tombstone(next, 'entry', e);
+        }
+        const n = findLive(next.notes, noteId(date, studioId));
+        if (n) {
+          removed.push({ kind: 'note', data: copyRec(n) });
+          tombstone(next, 'note', n);
+        }
+        if (removed.length === 0) throw new ValidationError(MSG.noDay);
+        return removed;
+      });
+    },
+
+    /**
+     * Sposta una giornata (tutte le righe e la nota) su un'altra data e/o un altro studio.
+     * note (facoltativa): nuovo testo della nota ('' = elimina), salvato nella stessa operazione:
+     * se lo spostamento non è possibile non cambia niente.
+     */
+    moveDayEntries(src, dst, { note } = {}) {
+      if (!isValidISODate(dst?.date)) throw new ValidationError(MSG.date);
+      const same = src.date === dst.date && src.studioId === dst.studioId;
+      if (same && note === undefined) return 0;
+      return mutate((next) => {
+        if (note !== undefined) {
+          if (!findLive(next.studios, src.studioId)) throw new ValidationError(MSG.studioNotFound);
+          upsertNote(next, src.date, src.studioId, note);
+        }
+        if (same) return 0;
+        if (!findLive(next.studios, dst.studioId)) throw new ValidationError(MSG.studioNotFound);
+        const list = next.entries.filter((e) => !e.deleted && e.date === src.date && e.studioId === src.studioId);
+        const srcNote = findLive(next.notes, noteId(src.date, src.studioId));
+        if (list.length === 0 && !srcNote) {
+          if (note !== undefined) return 0; // la nota appena tolta era tutto: niente da spostare
+          throw new ValidationError(MSG.noDay);
+        }
+        for (const e of list) {
+          const t = findLive(next.treatments, e.treatmentId);
+          if (!t) throw new ValidationError(MSG.treatmentNotFound);
+          if (!(dst.studioId in t.studios)) throw new ValidationError(MSG.notAssociatedTarget(t.name));
+        }
+        for (const e of list) {
+          e.date = dst.date;
+          e.studioId = dst.studioId;
+          touch(next, 'entry', e);
+        }
+        if (srcNote) {
+          const target = findLive(next.notes, noteId(dst.date, dst.studioId));
+          const text = target ? `${target.text}\n${srcNote.text}`.slice(0, MAX_NOTE) : srcNote.text;
+          tombstone(next, 'note', srcNote);
+          upsertNote(next, dst.date, dst.studioId, text);
+        }
+        return list.length;
+      });
+    },
+
+    /** Ripristina record eliminati (da "Annulla"); salta quelli già presenti o senza studio/trattamento. */
+    restoreRecords(list) {
+      return mutate((next) => {
+        let n = 0;
+        for (const item of list || []) {
+          const arr = ARRAY_OF[item?.kind] && next[ARRAY_OF[item.kind]];
+          if (!arr || !isObj(item.data)) continue;
+          const data = item.data;
+          if (findLive(arr, data.id)) continue;
+          if (data.studioId && !findLive(next.studios, data.studioId)) continue;
+          if (item.kind === 'entry' && !findLive(next.treatments, data.treatmentId)) continue;
+          const rec = { ...copyRec(data), deleted: false };
+          const idx = arr.findIndex((r) => r.id === data.id);
+          if (idx >= 0) {
+            rec.updatedAt = arr[idx].updatedAt;
+            arr[idx] = rec;
+          } else {
+            arr.push(rec);
+          }
+          touch(next, item.kind, rec);
+          n += 1;
+        }
+        return n;
+      });
+    },
+
+    // ---------- colore dello studio ----------
+    /** Studi della versione 1 senza colore: colori diversi in ordine di creazione (una sola volta). */
+    assignMissingColors() {
+      const missing = live(state.studios).filter((s) => !COLOR_KEYS.includes(s.color));
+      if (missing.length === 0 || readOnly) return 0;
+      return mutate((next) => {
+        const studios = live(next.studios).sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+        let n = 0;
+        for (const s of studios) {
+          if (COLOR_KEYS.includes(s.color)) continue;
+          s.color = nextStudioColor(studios.filter((x) => COLOR_KEYS.includes(x.color)));
+          touch(next, 'studio', s);
+          n += 1;
+        }
+        return n;
+      });
+    },
+    setStudioColor(id, color) {
+      if (!COLOR_KEYS.includes(color)) throw new ValidationError(MSG.color);
+      mutate((next) => {
+        const s = findLive(next.studios, id);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        s.color = color;
+        touch(next, 'studio', s);
+      });
+    },
+
+    // ---------- calendario di lavoro ----------
+    getCalendar() {
+      return {
+        rules: live(state.rules).map(copyRec),
+        days: live(state.days).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map(copyRec),
+      };
+    },
+    addRule(input) {
+      const fields = ruleFields(input);
+      const err = ruleError(fields);
+      if (err) throw new ValidationError(err);
+      return mutate((next) => {
+        const s = findLive(next.studios, fields.studioId);
+        if (!s || s.archived) throw new ValidationError(MSG.studioUnavailable);
+        const t = now();
+        const rec = { id: uuid(), ...fields, exdates: [], createdAt: t, updatedAt: t, deleted: false };
+        next.rules.push(rec);
+        markDirty(next, 'rule', rec.id);
+        return rec.id;
+      });
+    },
+    updateRule(id, input) {
+      mutate((next) => {
+        const idx = next.rules.findIndex((r) => r.id === id && !r.deleted);
+        if (idx < 0) throw new ValidationError(MSG.ruleNotFound);
+        const old = next.rules[idx];
+        const fields = ruleFields({ ...old, ...input });
+        const rec = {
+          id: old.id, ...fields, exdates: [...(input.exdates ?? old.exdates ?? [])].sort(),
+          createdAt: old.createdAt, updatedAt: old.updatedAt, deleted: false,
+        };
+        const err = ruleError(rec);
+        if (err) throw new ValidationError(err);
+        if (!findLive(next.studios, rec.studioId)) throw new ValidationError(MSG.studioNotFound);
+        next.rules[idx] = rec;
+        touch(next, 'rule', rec);
+      });
+    },
+    deleteRule(id) {
+      mutate((next) => {
+        const r = findLive(next.rules, id);
+        if (!r) throw new ValidationError(MSG.ruleNotFound);
+        tombstone(next, 'rule', r);
+      });
+    },
+    /** Aggiunge giorni singoli per uno studio (salta quelli già presenti). Ritorna gli id creati. */
+    addWorkDays(studioId, dates, time = null) {
+      const list = [...new Set(dates || [])].sort();
+      if (list.length === 0) throw new ValidationError(MSG.date);
+      for (const date of list) {
+        const err = dayError({ studioId, date, time });
+        if (err) throw new ValidationError(err);
+      }
+      return mutate((next) => {
+        const s = findLive(next.studios, studioId);
+        if (!s || s.archived) throw new ValidationError(MSG.studioUnavailable);
+        const t = now();
+        const ids = [];
+        for (const date of list) {
+          if (next.days.some((d) => !d.deleted && d.studioId === studioId && d.date === date)) continue;
+          const rec = { id: uuid(), studioId, date, time: time || null, createdAt: t, updatedAt: t, deleted: false };
+          next.days.push(rec);
+          markDirty(next, 'day', rec.id);
+          ids.push(rec.id);
+        }
+        return ids;
+      });
+    },
+    updateWorkDay(id, patch) {
+      mutate((next) => {
+        const d = findLive(next.days, id);
+        if (!d) throw new ValidationError(MSG.dayNotFound);
+        const merged = { ...d, ...pick(patch, ['studioId', 'date', 'time']) };
+        const err = dayError(merged);
+        if (err) throw new ValidationError(err);
+        const s = findLive(next.studios, merged.studioId);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        // come addWorkDays: niente giorni nuovi per uno studio archiviato (resta modificabile solo l'orario)
+        const moved = merged.studioId !== d.studioId || merged.date !== d.date;
+        if (s.archived && moved) throw new ValidationError(MSG.studioUnavailable);
+        if (moved && next.days.some((x) => !x.deleted && x.id !== d.id && x.studioId === merged.studioId && x.date === merged.date)) {
+          throw new ValidationError(MSG.dayDuplicate);
+        }
+        Object.assign(d, merged);
+        touch(next, 'day', d);
+      });
+    },
+    removeWorkDay(id) {
+      mutate((next) => {
+        const d = findLive(next.days, id);
+        if (!d) throw new ValidationError(MSG.dayNotFound);
+        tombstone(next, 'day', d);
+      });
+    },
+    /** Toglie dal calendario un giorno per uno studio: data esclusa nelle regole, giorni singoli eliminati. */
+    unscheduleDay(date, studioId) {
+      if (!isValidISODate(date)) throw new ValidationError(MSG.date);
+      return mutate((next) => {
+        let n = 0;
+        for (const r of next.rules) {
+          if (r.deleted || r.studioId !== studioId || occurrences(r, date, date).length === 0) continue;
+          r.exdates = [...new Set([...(r.exdates || []), date])].sort();
+          touch(next, 'rule', r);
+          n += 1;
+        }
+        for (const d of next.days) {
+          if (d.deleted || d.studioId !== studioId || d.date !== date) continue;
+          tombstone(next, 'day', d);
+          n += 1;
+        }
+        return n;
+      });
+    },
+
+    // ---------- note delle giornate ----------
+    getNote(date, studioId) {
+      const n = findLive(state.notes, noteId(date, studioId));
+      return n ? n.text : null;
+    },
+    getNotes({ from, to, studioId } = {}) {
+      return live(state.notes)
+        .filter((n) => (!from || n.date >= from) && (!to || n.date <= to) && (!studioId || n.studioId === studioId))
+        .map(copyRec);
+    },
+    setNote(date, studioId, text) {
+      if (!isValidISODate(date)) throw new ValidationError(MSG.date);
+      mutate((next) => {
+        if (!findLive(next.studios, studioId)) throw new ValidationError(MSG.studioNotFound);
+        upsertNote(next, date, studioId, text);
+      });
+    },
+
+    // ---------- incassi (pagato / da incassare) per mese e studio ----------
+    getPayments() {
+      return live(state.payments).map(copyRec);
+    },
+    /** list: [{month:'YYYY-MM', studioId, paid}] */
+    setPaid(list) {
+      for (const p of list || []) {
+        if (typeof p?.month !== 'string' || !MONTH_RE.test(p.month)) throw new ValidationError(MSG.month);
+      }
+      mutate((next) => {
+        for (const p of list || []) {
+          if (!findLive(next.studios, p.studioId)) throw new ValidationError(MSG.studioNotFound);
+          upsert(next, 'payment', paymentId(p.month, p.studioId), { month: p.month, studioId: p.studioId, paid: p.paid === true });
+        }
+      });
+    },
+
+    /** Momento dell'ultima modifica nota (ms), o 0. */
+    lastChangeAt() {
+      let max = 0;
+      for (const arr of Object.values(ARRAY_OF)) for (const r of state[arr]) if (r.updatedAt > max) max = r.updatedAt;
+      return max;
     },
 
     // ---------- backup e sincronizzazione ----------
@@ -515,8 +991,15 @@ export function createStore(deps) {
         studios: live(state.studios).map(copyRec),
         treatments: live(state.treatments).map(copyRec),
         entries: live(state.entries).map(copyRec),
+        calendar: { rules: live(state.rules).map(copyRec), days: live(state.days).map(copyRec) },
+        notes: live(state.notes).map(copyRec),
+        payments: live(state.payments).map(copyRec),
       };
     },
+    /**
+     * Sostituisce i dati con quelli di un backup. Le sezioni facoltative assenti
+     * (calendar, notes, payments: backup della versione 1) lasciano invariati i dati attuali.
+     */
     replaceAll(data) {
       const next = structuredClone(state);
       const incoming = {
@@ -524,14 +1007,19 @@ export function createStore(deps) {
         treatments: structuredClone(data.treatments || []),
         entries: structuredClone(data.entries || []),
       };
+      if (isObj(data.calendar)) {
+        incoming.rules = structuredClone(data.calendar.rules || []);
+        incoming.days = structuredClone(data.calendar.days || []);
+      }
+      if (Array.isArray(data.notes)) incoming.notes = structuredClone(data.notes);
+      if (Array.isArray(data.payments)) incoming.payments = structuredClone(data.payments);
       if (!next.tracking.enabled) {
-        next.studios = incoming.studios;
-        next.treatments = incoming.treatments;
-        next.entries = incoming.entries;
+        for (const arr of Object.keys(incoming)) next[arr] = incoming[arr];
         next.tracking = { enabled: false, dirty: [] };
       } else {
         for (const kind of KINDS) {
           const arr = ARRAY_OF[kind];
+          if (!incoming[arr]) continue;
           const current = new Map(next[arr].map((r) => [r.id, r]));
           const incomingIds = new Set(incoming[arr].map((r) => r.id));
           const result = [];
@@ -602,8 +1090,7 @@ export function createStore(deps) {
       const on = enabled === true;
       if (state.tracking.enabled === on) {
         if (on) return;
-        const hasTomb = state.studios.some((r) => r.deleted) || state.treatments.some((r) => r.deleted)
-          || state.entries.some((r) => r.deleted);
+        const hasTomb = Object.values(ARRAY_OF).some((arr) => state[arr].some((r) => r.deleted));
         if (state.tracking.dirty.length === 0 && !hasTomb) return;
       }
       mutate((next) => {

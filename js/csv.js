@@ -1,29 +1,60 @@
-// CSV di riepilogo per singolo studio, formattato per Excel in italiano (funzioni pure).
+// CSV di riepilogo per studio, con date e importi in formato italiano (funzioni pure).
+// Due separatori, stesse colonne e stessi valori:
+//  - 'excel'   punto e virgola: Excel con impostazioni italiane lo apre già in colonne;
+//  - 'virgola' virgola, con gli importi tra virgolette ("210,00"): Numbers, Google Fogli,
+//              l'anteprima dell'iPhone ed Excel con impostazioni non italiane lo aprono in colonne.
 import { formatIT } from './dates.js';
 import { formatEuroCsv } from './money.js';
-import { MISSING_TREATMENT } from './aggregate.js';
+import { MISSING_TREATMENT, MISSING_STUDIO } from './aggregate.js';
 
 export const CSV_HEADER = ['Data', 'Trattamento', 'Numero pazienti', 'Costo trattamento (€)'];
+export const CSV_HEADER_ALL = ['Data', 'Studio', 'Trattamento', 'Numero pazienti', 'Costo trattamento (€)'];
+export const CSV_FORMATS = {
+  virgola: { sep: ',', label: 'Numbers, Google Fogli, iPhone' },
+  excel: { sep: ';', label: 'Excel in italiano' },
+};
 
 const lookup = (byId, id) => (byId instanceof Map ? byId.get(id) : byId?.[id]);
+const sepOf = (format) => (CSV_FORMATS[format] || CSV_FORMATS.excel).sep;
 
-/** Protezione da formula injection, poi quoting. */
-export function csvText(value) {
+/** Protezione da formula injection, poi quoting (se contiene separatore, virgolette o a capo). */
+export function csvText(value, sep = ';') {
   let s = String(value ?? '');
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  if (/[;"\r\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
+  if (s.includes(sep) || /["\r\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
-export function buildStudioCsv({ entries, treatmentsById }) {
+const finish = (lines) => `\uFEFF${lines.join('\r\n')}\r\n`;
+
+export function buildStudioCsv({ entries, treatmentsById, format = 'excel' }) {
+  const sep = sepOf(format);
   const rows = entries.map((e) => ({ e, name: lookup(treatmentsById, e.treatmentId)?.name ?? MISSING_TREATMENT }));
   rows.sort((a, b) => (a.e.date < b.e.date ? -1 : a.e.date > b.e.date ? 1 : 0)
     || a.name.localeCompare(b.name, 'it') || a.e.createdAt - b.e.createdAt);
-  const lines = [CSV_HEADER.map(csvText).join(';')];
+  const lines = [CSV_HEADER.map((h) => csvText(h, sep)).join(sep)];
   for (const { e, name } of rows) {
-    lines.push([formatIT(e.date), csvText(name), String(e.patients), formatEuroCsv(e.amountCents)].join(';'));
+    lines.push([formatIT(e.date), csvText(name, sep), String(e.patients), csvText(formatEuroCsv(e.amountCents), sep)].join(sep));
   }
-  return `\uFEFF${lines.join('\r\n')}\r\n`;
+  return finish(lines);
+}
+
+/** CSV unico di tutti gli studi (uso personale): stessa struttura con la colonna Studio. */
+export function buildAllStudiosCsv({ entries, treatmentsById, studiosById, format = 'excel' }) {
+  const sep = sepOf(format);
+  const rows = entries.map((e) => ({
+    e,
+    name: lookup(treatmentsById, e.treatmentId)?.name ?? MISSING_TREATMENT,
+    studio: lookup(studiosById, e.studioId)?.name ?? MISSING_STUDIO,
+  }));
+  rows.sort((a, b) => (a.e.date < b.e.date ? -1 : a.e.date > b.e.date ? 1 : 0)
+    || a.studio.localeCompare(b.studio, 'it') || a.name.localeCompare(b.name, 'it') || a.e.createdAt - b.e.createdAt);
+  const lines = [CSV_HEADER_ALL.map((h) => csvText(h, sep)).join(sep)];
+  for (const { e, name, studio } of rows) {
+    lines.push([formatIT(e.date), csvText(studio, sep), csvText(name, sep), String(e.patients),
+      csvText(formatEuroCsv(e.amountCents), sep)].join(sep));
+  }
+  return finish(lines);
 }
 
 export function slugify(name) {
