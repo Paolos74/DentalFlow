@@ -1,0 +1,104 @@
+# DentalFlow
+
+Progressive Web App per igienista dentale: registra pazienti e incassi per giorno, studio e trattamento, mostra riepiloghi e grafici ed esporta il CSV da confrontare con gli studi. Funziona offline, si installa sul telefono e non richiede account.
+
+Sito statico in HTML, CSS e JavaScript, senza build e senza librerie esterne.
+
+## Cos'è DentalFlow
+
+| Sezione | Cosa fa |
+|---|---|
+| **Gestione → Studi** | Aggiungi, rinomina, archivia/ripristina ed elimina gli studi in cui lavori. Se uno studio ha inserimenti puoi scegliere **Archivia** (i dati restano) oppure **Elimina definitivamente** (con doppia conferma). |
+| **Gestione → Trattamenti** | Crei i tipi di trattamento e scegli subito **in quali studi** offrirli (anche più studi insieme). Puoi aggiungerli ad altri studi, rimuoverli da più studi, archiviarli/ripristinarli, rinominarli o eliminarli. |
+| **Inserisci** | Scegli giorno e studio. Per ogni trattamento attivo indichi il numero di pazienti e l'**importo totale** incassato (es. 13/02/2026, Igiene dentale, 7 pazienti, 210 €). |
+| **Registro** | Elenco di tutti gli inserimenti con filtri. Ogni inserimento è modificabile in ogni campo (data, studio, trattamento, pazienti, importo) ed eliminabile. |
+| **Riepilogo** | Per un singolo studio o per tutti: quanti e quali trattamenti, pazienti e totale in euro, percentuali, totali per studio. Periodo: questo mese, mese scorso, quest'anno, tutto o personalizzato. |
+| **Riepilogo → Esporta CSV** | Per un singolo studio, nel periodo scelto: colonne `Data;Trattamento;Numero pazienti;Costo trattamento (€)`, formato pronto per Excel in italiano (separatore `;`, date `GG/MM/AAAA`, virgola decimale). |
+| **Grafici** | Quale trattamento pesa di più (euro o pazienti) e andamento nel tempo, totale o per trattamento, per tutti gli studi o per uno solo. Raggruppamento per giorno, settimana, mese o anno, utile per vedere la stagionalità. |
+| **Gestione → Backup** | Esporta e importa tutti i dati in un file JSON. |
+| **Gestione → Sincronizzazione** | Facoltativa, con Firebase gratuito (vedi sotto). Disattivata finché non la configuri. |
+
+Gli importi sono gestiti in centesimi interi, così i totali sono sempre esatti.
+
+## Pubblicare su GitHub Pages
+
+1. Su GitHub crea un repository **pubblico** (GitHub Pages gratuito richiede un repository pubblico), ad esempio `dentalflow`.
+2. Carica il **contenuto** della cartella `igienista-pwa/` nella radice del repository (pulsante *Add file → Upload files*, trascinando file e cartelle).
+   - **Non caricare la cartella `.agents/`**: contiene solo file di lavoro dello sviluppo, non fa parte dell'app.
+   - Le cartelle `tests/` e `tools/` e il file `package.json` sono facoltativi: servono solo per i test e per rigenerare le icone.
+   - Il file `.nojekyll` (vuoto) evita l'elaborazione Jekyll. Finder ed Esplora risorse nascondono i file che iniziano con il punto, quindi il caricamento web potrebbe saltarlo: puoi crearlo con *Add file → Create new file*, nome `.nojekyll`, contenuto vuoto. Per questa app è comunque facoltativo, perché nessun percorso inizia con `_`.
+3. Vai in **Settings → Pages**. In *Build and deployment* scegli *Deploy from a branch*, branch `main`, cartella `/ (root)`, poi *Save*.
+4. Dopo uno o due minuti l'app è su `https://<utente>.github.io/<repo>/`.
+
+Tutti i percorsi dell'app sono relativi, quindi funziona anche dentro la sotto-cartella `/<repo>/`.
+
+## Installare l'app
+
+- **Android / Chrome (anche desktop)**: apri il sito, poi *Gestione → Installa app* oppure il menu del browser → *Installa app* / *Aggiungi a schermata Home*.
+- **iPhone / iPad (Safari)**: pulsante *Condividi* → *Aggiungi alla schermata Home*.
+
+L'app installata si apre a schermo intero, come un'app normale.
+
+## Provare l'offline
+
+1. Apri il sito una volta con la connessione attiva (al primo avvio l'app salva i suoi file sul dispositivo).
+2. Attiva la modalità aereo.
+3. Riapri l'app (o ricarica la pagina): funziona e mostra i tuoi dati. In alto compare il badge "Offline".
+
+I dati sono sempre salvati sul dispositivo, quindi puoi inserire anche senza connessione.
+
+## Aggiornamenti
+
+Quando pubblichi una nuova versione, cambia la riga `const VERSION = 'dentalflow-v1';` in `sw.js` (es. `dentalflow-v2`). Al prossimo avvio l'app mostra il banner **"È disponibile una nuova versione"**. Il pulsante **Aggiorna** carica la nuova versione. L'app non si ricarica mai da sola, così non perdi un inserimento a metà.
+
+## Backup
+
+- *Gestione → Backup → Esporta backup* scarica `DentalFlow-backup-AAAA-MM-GG.json`.
+- *Importa backup* sostituisce tutti i dati attuali con quelli del file, dopo una conferma.
+- I dati vivono nel browser del dispositivo: se cancelli i dati del sito o disinstalli il browser, si perdono. **Esporta un backup regolarmente** (ad esempio ogni mese) e conservalo, per esempio nel cloud o via email.
+
+## Sincronizzazione con Firebase (gratuita, facoltativa)
+
+> **Non testata in questo ambiente di sviluppo**: i server Firebase non erano raggiungibili. La logica è coperta solo da test automatici con un Firebase simulato. L'app funziona completamente anche senza.
+
+Serve solo se vuoi gli stessi dati su più dispositivi. Usa il piano gratuito **Spark** di Firebase.
+
+1. Vai su [console.firebase.google.com](https://console.firebase.google.com), crea un progetto (piano Spark, nessuna carta richiesta; Google Analytics può restare disattivato).
+2. Nel progetto aggiungi un'app **Web** (icona `</>`), senza Firebase Hosting. Dalla configurazione mostrata copia `apiKey` e `projectId`.
+3. **Authentication** → *Inizia* → *Metodo di accesso* → abilita **Email/password**. Poi *Users* → *Add user*: crea il tuo utente (email e password).
+4. **Firestore Database** → *Crea database* → modalità produzione, località in Europa. Poi scheda **Regole**, incolla queste regole e premi *Pubblica*:
+
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /users/{uid}/records/{recordId} {
+         allow read, write: if request.auth != null && request.auth.uid == uid;
+       }
+     }
+   }
+   ```
+
+5. Facoltativo: in Google Cloud Console → *API e servizi → Credenziali*, limita la chiave API ai referrer `https://<utente>.github.io/*`.
+6. Facoltativo: nelle impostazioni di Authentication disattiva la creazione di nuovi utenti, se l'opzione è disponibile.
+7. Nell'app: *Gestione → Sincronizzazione online* → incolla API key e Project ID, inserisci email e password → **Accedi e sincronizza**. Ripeti sugli altri dispositivi con gli stessi dati.
+
+Note:
+- Quote gratuite: vedi [firebase.google.com/pricing](https://firebase.google.com/pricing) e [firebase.google.com/docs/firestore/pricing](https://firebase.google.com/docs/firestore/pricing). L'uso di una sola persona resta molto sotto i limiti gratuiti.
+- Sicurezza: la API key di Firebase non è segreta (identifica solo il progetto); i dati sono protetti dalle regole qui sopra. La password non viene salvata; sul dispositivo resta un token di accesso (refresh token) nel browser.
+- In caso di modifiche dello stesso dato da due dispositivi vince la più recente.
+- **Disconnetti** mantiene i dati locali. Gli elementi eliminati mentre sei disconnesso possono ricomparire dopo la riconnessione, perché la copia online li ha ancora: eliminali di nuovo dopo la sincronizzazione.
+
+## Test automatici
+
+Servono solo per lo sviluppo. Con Node.js 22 o superiore (nessuna installazione di pacchetti):
+
+```
+node --test tests/*.test.js
+```
+
+Per rigenerare le icone (solo Python, nessuna libreria esterna): `python3 tools/make_icons.py`.
+
+## Verifica con Lighthouse
+
+Dopo la pubblicazione apri il sito in Chrome → *Strumenti per sviluppatori* (F12) → scheda **Lighthouse** → seleziona *Progressive Web App* (se presente) e *Performance* → *Analyze page load*. Nelle versioni recenti di Chrome la categoria PWA non c'è più: l'installabilità si controlla in *Strumenti per sviluppatori → Application → Manifest* (sezione "Installability") e *Application → Service workers*. Nell'ambiente di sviluppo Lighthouse non era disponibile.

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="theme-color" content="#1565C0">
+  <meta name="description" content="DentalFlow: registro trattamenti e incassi per igienista dentale">
+  <title>DentalFlow</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/favicon-32.png" type="image/png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="DentalFlow">
+  <link rel="stylesheet" href="./css/app.css">
+  <script type="module" src="./js/app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="app-title">
+      <img src="./icons/favicon-32.png" alt="" width="28" height="28">
+      DentalFlow
+    </h1>
+    <span id="offline-badge" class="badge-offline" hidden>Offline</span>
+  </header>
+
+  <div id="load-warning" class="banner banner-warning" role="alert" hidden></div>
+  <div id="update-banner" class="banner banner-update" role="status" hidden>
+    <span>È disponibile una nuova versione</span>
+    <button type="button" id="update-btn" class="btn btn-light">Aggiorna</button>
+  </div>
+
+  <main id="view" class="view" tabindex="-1">
+    <noscript><p class="card">DentalFlow richiede JavaScript attivo nel browser.</p></noscript>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Sezioni">
+    <a href="#inserisci" data-route="inserisci">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      <span>Inserisci</span>
+    </a>
+    <a href="#registro" data-route="registro">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>
+      <span>Registro</span>
+    </a>
+    <a href="#riepilogo" data-route="riepilogo">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Riepilogo</span>
+    </a>
+    <a href="#grafici" data-route="grafici">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Grafici</span>
+    </a>
+    <a href="#gestione" data-route="gestione">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Gestione</span>
+    </a>
+  </nav>
+
+  <div id="toast-host" class="toast-host" aria-live="polite"></div>
+  <div id="dialog-host"></div>
+</body>
+</html>

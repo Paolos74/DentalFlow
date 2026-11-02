@@ -1,0 +1,25 @@
+{
+  "id": "./",
+  "name": "DentalFlow – Igienista dentale",
+  "short_name": "DentalFlow",
+  "description": "Registro trattamenti e incassi per igienista dentale",
+  "lang": "it",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#1565C0",
+  "background_color": "#FFFFFF",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nuovo inserimento",
+      "url": "./#inserisci",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
