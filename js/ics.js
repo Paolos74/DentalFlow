@@ -1,6 +1,6 @@
 // Esportazione del calendario di lavoro in formato iCalendar (.ics, RFC 5545). Funzioni pure.
 import { addDays } from './dates.js';
-import { firstMatch, describePattern } from './calendar.js';
+import { firstMatch, describePattern, hasDayTimes, occurrences } from './calendar.js';
 
 const BYDAY = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
 const lookup = (byId, id) => (byId instanceof Map ? byId.get(id) : byId?.[id]);
@@ -60,6 +60,36 @@ export function rruleOf(rule) {
   return parts.join(';');
 }
 
+/**
+ * Una regola settimanale con orari diversi per giorno diventa un evento per ogni orario
+ * (es. lunedì 9–13 e mercoledì 14–19 sono due eventi). Con "Dopo N volte" la fine diventa
+ * la data dell'ultima occorrenza, perché il conteggio vale per la regola intera.
+ */
+export function splitByTime(rule) {
+  if (!hasDayTimes(rule)) return [{ uid: rule.id, rule }];
+  const groups = new Map();
+  for (const d of [...rule.weekdays].sort((a, b) => a - b)) {
+    const t = rule.dayTimes[String(d)] || rule.time || null;
+    const key = t ? `${t.from}-${t.to}` : '';
+    if (!groups.has(key)) groups.set(key, { time: t, weekdays: [] });
+    groups.get(key).weekdays.push(d);
+  }
+  if (groups.size === 1) {
+    const [g] = groups.values();
+    return [{ uid: rule.id, rule: { ...rule, time: g.time, dayTimes: undefined } }];
+  }
+  let end = rule.end || { type: 'never' };
+  if (end.type === 'count') {
+    const horizon = 7 * (rule.interval || 1) * end.count + 14;
+    const all = occurrences({ ...rule, exdates: [] }, rule.start, addDays(rule.start, horizon));
+    end = { type: 'until', date: all[all.length - 1] || rule.start };
+  }
+  return [...groups.values()].map((g) => ({
+    uid: `${rule.id}-${g.weekdays.join('')}`,
+    rule: { ...rule, weekdays: g.weekdays, time: g.time, dayTimes: undefined, end },
+  }));
+}
+
 function timing(date, time) {
   if (time) {
     return [`DTSTART:${compact(date)}T${hhmm(time.from)}00`, `DTEND:${compact(date)}T${hhmm(time.to)}00`];
@@ -83,17 +113,21 @@ export function buildIcs({ rules = [], days = [], studiosById, now = Date.now() 
   for (const r of rules) {
     if (r.deleted) continue;
     const s = usable(r.studioId);
-    const first = s && firstMatch(r);
-    if (!first) continue;
-    lines.push('BEGIN:VEVENT', `UID:${r.id}@dentalflow`, `DTSTAMP:${stamp}`, ...timing(first, r.time),
-      `RRULE:${rruleOf(r)}`);
-    const ex = (r.exdates || []).filter((d) => d >= first).sort();
-    if (ex.length) {
-      lines.push(r.time
-        ? `EXDATE:${ex.map((d) => `${compact(d)}T${hhmm(r.time.from)}00`).join(',')}`
-        : `EXDATE;VALUE=DATE:${ex.map(compact).join(',')}`);
+    if (!s) continue;
+    for (const part of splitByTime(r)) {
+      const first = firstMatch(part.rule);
+      if (!first) continue;
+      const time = part.rule.time;
+      lines.push('BEGIN:VEVENT', `UID:${part.uid}@dentalflow`, `DTSTAMP:${stamp}`, ...timing(first, time),
+        `RRULE:${rruleOf(part.rule)}`);
+      const ex = (r.exdates || []).filter((d) => d >= first && occurrences({ ...part.rule, exdates: [] }, d, d).length).sort();
+      if (ex.length) {
+        lines.push(time
+          ? `EXDATE:${ex.map((d) => `${compact(d)}T${hhmm(time.from)}00`).join(',')}`
+          : `EXDATE;VALUE=DATE:${ex.map(compact).join(',')}`);
+      }
+      lines.push(`SUMMARY:${icsText(s.name)}`, `DESCRIPTION:${icsText(`${describePattern(r)} · DentalFlow`)}`, 'TRANSP:OPAQUE', 'END:VEVENT');
     }
-    lines.push(`SUMMARY:${icsText(s.name)}`, `DESCRIPTION:${icsText(`${describePattern(r)} · DentalFlow`)}`, 'TRANSP:OPAQUE', 'END:VEVENT');
   }
   for (const d of days) {
     if (d.deleted) continue;

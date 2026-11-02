@@ -367,7 +367,7 @@ function csvFiles(ctx, list, range, { all = false } = {}) {
     rows += entries.length;
     subs.push(subOf(entries));
     const csv = buildStudioCsv({ entries, treatmentsById, format });
-    files.push(new File([csv], csvFileName({ studioName: s.name, from: range.from, to: range.to }), { type: 'text/csv;charset=utf-8' }));
+    files.push(new File([csv], csvFileName({ studioName: s.name, from: range.from, to: range.to }), { type: 'text/csv' }));
     titles.push(s.name);
   }
   if (all) {
@@ -376,7 +376,7 @@ function csvFiles(ctx, list, range, { all = false } = {}) {
     if (entries.length) {
       const studiosById = Object.fromEntries(store.getStudios({ includeArchived: true }).map((s) => [s.id, s]));
       const csv = buildAllStudiosCsv({ entries, treatmentsById, studiosById, format });
-      files.push(new File([csv], csvFileName({ studioName: 'tutti-gli-studi', from: range.from, to: range.to }), { type: 'text/csv;charset=utf-8' }));
+      files.push(new File([csv], csvFileName({ studioName: 'tutti-gli-studi', from: range.from, to: range.to }), { type: 'text/csv' }));
       titles.push('Tutti gli studi');
       subs.push(subOf(entries));
     }

@@ -6,9 +6,13 @@ import {
   downloadBlob, canShareFile, shareFile, getSwVersion, listRow, studioDot,
   pageHeader, sectionHead, iconTile, icon, emptyState, iconButton, navButton, groupNote, groupRow, formGroup, archivedBadge,
 } from '../ui.js';
-import { todayISO, formatDateShort } from '../dates.js';
+import { todayISO, formatDateShort, formatDayTitle, formatLong, addDays } from '../dates.js';
 import { buildBackup, parseBackupText, validateBackup } from '../backup.js';
-import { describeRule, describePattern, formatTime } from '../calendar.js';
+import {
+  describeRule, describePattern, describeTimes, describeEnd, formatTime, scheduleBetween,
+} from '../calendar.js';
+import { ruleDialog } from './calendario.js';
+import { FIREBASE_CONFIG } from '../firebase-config.js';
 import { STUDIO_COLORS, studioColorKey } from '../colors.js';
 import { readBeforeImport, writeBeforeImport, clearBeforeImport } from '../prefs.js';
 
@@ -166,6 +170,75 @@ function treatmentStateSelect(ctx, t, studioId, studioName, id) {
   return sel;
 }
 
+// ---------- giorni di lavoro dello studio: ripetizioni e prossimi giorni ----------
+const NEXT_DAYS = 8;
+
+function workDaysCard(ctx, s) {
+  const { store } = ctx;
+  const cal = store.getCalendar();
+  const rules = cal.rules.filter((r) => r.studioId === s.id);
+  const card = el('section', { class: 'card', id: 'ges-studio-workdays' },
+    el('div', { class: 'card-head' }, iconTile('repeat', 'red'), el('h3', { text: 'Giorni di lavoro' })));
+
+  // ripetizioni: un tocco apre il foglio (modifica, elimina)
+  if (rules.length) {
+    const ul = el('ul', { class: 'list grouped', id: 'ges-studio-rules' });
+    for (const r of rules) {
+      ul.append(el('li', {}, el('button', {
+        type: 'button', class: 'row', dataset: { rule: r.id }, 'aria-label': `Modifica la ripetizione: ${describeRule(r)}`,
+        onclick: () => ruleDialog(ctx, r, { studioId: s.id }),
+      }, el('span', { class: 'row-main' }, el('span', { class: 'row-title', text: describePattern(r) }),
+        el('span', { class: 'row-sub', text: [describeTimes(r), describeEnd(r)].filter(Boolean).join(' · ') })), icon('chevron'))));
+    }
+    card.append(ul);
+  } else {
+    card.append(el('p', { class: 'muted', text: s.archived
+      ? 'Nessuna ripetizione.'
+      : 'Nessuna ripetizione. Esempio: ogni lunedì 9–13 e mercoledì 14–19.' }));
+  }
+  if (!s.archived) {
+    card.append(el('button', {
+      type: 'button', class: 'btn btn-primary btn-block', id: 'ges-rule-new', onclick: () => ruleDialog(ctx, null, { studioId: s.id }),
+    }, icon('plus'), 'Nuova ripetizione'));
+  } else if (rules.length) {
+    card.append(groupNote('Lo studio è archiviato: le ripetizioni restano salvate ma non vengono proposte.'));
+  }
+
+  // prossimi giorni: ognuno si toglie da solo, le altre date restano
+  if (!s.archived) {
+    const today = todayISO();
+    const sched = scheduleBetween(cal, today, addDays(today, 180), { studiosById: { [s.id]: s } });
+    const next = [...sched.keys()].sort().slice(0, NEXT_DAYS);
+    card.append(sectionHead('Prossimi giorni'));
+    if (next.length === 0) {
+      card.append(el('p', { class: 'muted', text: 'Nessun giorno in programma.' }));
+    } else {
+      const ul = el('ul', { class: 'list', id: 'ges-studio-next' });
+      for (const iso of next) {
+        const item = sched.get(iso)[0];
+        const fromRule = item.sources.some((x) => x.type === 'rule');
+        ul.append(el('li', { class: 'list-item next-day-row', dataset: { date: iso } },
+          el('div', { class: 'item-head' },
+            el('span', { class: 'item-title', text: formatDayTitle(iso) }),
+            el('button', {
+              type: 'button', class: 'btn btn-small btn-secondary', text: 'Togli',
+              'aria-label': `Togli ${formatLong(iso)} dal calendario`,
+              onclick: async () => {
+                const msg = fromRule ? 'Solo questo giorno: le altre date della ripetizione restano. I dati già inseriti restano.' : 'I dati già inseriti restano.';
+                if (!(await confirmDialog(msg, { title: `Togliere ${formatDayTitle(iso)}?`, okText: 'Togli il giorno', danger: true }))) return;
+                if (run(() => store.unscheduleDay(iso, s.id))) toast('Giorno tolto dal calendario');
+              },
+            })),
+          el('div', { class: 'item-meta', text: [item.time ? formatTime(item.time) : null, fromRule ? 'ripetizione' : 'giorno singolo'].filter(Boolean).join(' · ') })));
+      }
+      card.append(ul);
+    }
+  }
+  card.append(el('ul', { class: 'list grouped' },
+    listRow({ href: `#calendario?studio=${encodeURIComponent(s.id)}`, id: 'ges-studio-calendar', title: 'Apri nel calendario', subtitle: 'Giorni singoli e vista del mese', lead: iconTile('calendar', 'red') })));
+  return card;
+}
+
 function studioPage(ctx, rawId) {
   const { store } = ctx;
   const id = decodeURIComponent(rawId);
@@ -190,17 +263,7 @@ function studioPage(ctx, rawId) {
         onclick: () => { if (c.key !== color && run(() => store.setStudioColor(s.id, c.key))) toast('Colore aggiornato'); },
       }, c.key === color ? icon('check') : null)))));
 
-  // giorni di lavoro: riepilogo, l'editor è il Calendario
-  const cal = store.getCalendar();
-  const rules = cal.rules.filter((r) => r.studioId === s.id);
-  const days = cal.days.filter((d) => d.studioId === s.id && d.date >= todayISO());
-  const ul = el('ul', { class: 'list grouped' });
-  const info = (text, ic) => el('li', {}, el('div', { class: 'row' }, iconTile(ic, 'red'), el('span', { class: 'row-main' }, el('span', { class: 'row-title', text }))));
-  for (const r of rules) ul.append(info(describeRule(r), 'repeat'));
-  if (days.length) ul.append(info(`${plural(days.length, 'giorno singolo', 'giorni singoli')} in programma (il prossimo: ${formatDateShort(days[0].date)}${days[0].time ? ` ${formatTime(days[0].time)}` : ''})`, 'calendar-day'));
-  if (!rules.length && !days.length) ul.append(info('Nessun giorno di lavoro impostato.', 'calendar'));
-  ul.append(listRow({ href: `#calendario?studio=${encodeURIComponent(s.id)}`, id: 'ges-studio-calendar', title: 'Modifica nel calendario', lead: iconTile('calendar', 'red') }));
-  wrap.append(el('section', { class: 'card' }, el('h3', { text: 'Giorni di lavoro' }), ul));
+  wrap.append(workDaysCard(ctx, s));
 
   // trattamenti con stato nello studio
   const treatments = store.getTreatments();
@@ -504,8 +567,14 @@ async function importBackup(ctx, file) {
 function syncSection(ctx) {
   const { sync } = ctx;
   const st = sync.getStatus();
+  // progetto già scritto nel codice (js/firebase-config.js): nel modulo restano solo email e password
+  const preset = FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId ? FIREBASE_CONFIG : null;
   if (!state.syncForm) {
-    state.syncForm = { apiKey: st.apiKey || '', projectId: st.projectId || '', email: st.email || '', password: '' };
+    state.syncForm = {
+      apiKey: preset ? preset.apiKey : st.apiKey || '',
+      projectId: preset ? preset.projectId : st.projectId || '',
+      email: st.email || '', password: '',
+    };
   }
   const f = state.syncForm;
   const mk = (id, type, key, label, extra = {}) => {
@@ -523,8 +592,9 @@ function syncSection(ctx) {
     text: state.signingIn ? 'Accesso in corso…' : 'Accedi e sincronizza', disabled: state.signingIn,
   });
   const form = el('form', { class: 'form', novalidate: true, id: 'ges-sync-form' },
-    sectionHead('Progetto Firebase'), formGroup(fKey.wrap, fProject.wrap),
+    preset ? null : sectionHead('Progetto Firebase'), preset ? null : formGroup(fKey.wrap, fProject.wrap),
     sectionHead('Account'), formGroup(fEmail.wrap, fPass.wrap),
+    preset ? groupNote(`Progetto Firebase: ${preset.projectId}`, { id: 'ges-sync-project-note' }) : null,
     el('div', { class: 'toolbar' }, signInBtn));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -686,18 +686,30 @@ export function downloadBlob(blob, filename) {
 
 export function canShareFile(file) {
   try {
-    return !!(navigator.canShare && navigator.canShare({ files: [file] }));
+    return !!(navigator.canShare && navigator.canShare({ files: Array.isArray(file) ? file : [file] }));
   } catch {
     return false;
   }
 }
 
-/** Condivide uno o più file con il foglio di condivisione del sistema. */
+/**
+ * Condivide uno o più file con il foglio di condivisione del sistema.
+ * Se il browser rifiuta la condivisione (es. Chrome su computer: "Permission denied" per il tipo di file)
+ * i file vengono scaricati, così l'esportazione non fallisce mai.
+ */
 export async function shareFile(file, title) {
+  const files = Array.isArray(file) ? file : [file];
+  const download = () => {
+    for (const f of files) downloadBlob(f, f.name);
+    toast(files.length === 1 ? 'Condivisione non disponibile qui: file scaricato' : 'Condivisione non disponibile qui: file scaricati');
+  };
+  if (!canShareFile(files)) { download(); return; }
   try {
-    await navigator.share({ files: Array.isArray(file) ? file : [file], title });
+    await navigator.share({ files, title });
   } catch (err) {
-    if (err?.name !== 'AbortError') showError(err);
+    if (err?.name === 'AbortError') return; // l'utente ha chiuso il foglio di condivisione
+    if (err?.name === 'NotAllowedError' || err?.name === 'TypeError' || err?.name === 'DataError') { download(); return; }
+    showError(err);
   }
 }
 

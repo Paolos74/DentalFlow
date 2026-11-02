@@ -71,7 +71,7 @@ function firstSteps(nStudios, nTreatments, nCalendar) {
   const steps = [
     ['Aggiungi uno studio', '#altro/studi', nStudios, 'dove lavori'],
     ['Aggiungi i trattamenti', '#altro/trattamenti', nTreatments, 'quelli che fai in ogni studio'],
-    ['Imposta il calendario', '#calendario', nCalendar, 'dove vai ogni giorno'],
+    ['Imposta i giorni di lavoro', '#altro/studi', nCalendar, 'nella scheda di ogni studio'],
   ];
   const done = steps.filter((s) => s[2] > 0).length;
   const looks = [['studio', 'blue'], ['tooth', 'mint'], ['calendar', 'red']];
@@ -166,7 +166,7 @@ function todayCard(ctx, { today, cal, activeById, byId, scheduled }) {
         el('div', {}, el('h3', { text: 'Dove lavori oggi?' }),
           el('p', { class: 'muted', text: 'Imposta i tuoi giorni: l\'app ti proporrà lo studio giusto.' }))),
         el('div', { class: 'toolbar' },
-          el('a', { class: 'btn btn-primary', href: '#calendario', id: 'oggi-setup-calendar', text: 'Imposta i tuoi giorni di lavoro' }),
+          el('a', { class: 'btn btn-primary', href: '#altro/studi', id: 'oggi-setup-calendar', text: 'Imposta i tuoi giorni di lavoro' }),
           el('a', { class: 'btn btn-secondary', href: '#inserisci', text: 'Inserisci una giornata' })));
     } else {
       const next = upcomingDays(cal, addDays(today, 1), { studiosById: activeById, limit: 1 })[0];

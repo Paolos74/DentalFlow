@@ -126,3 +126,33 @@ test('descrizioni in italiano', () => {
   assert.equal(formatTime({ from: '14:30', to: '18:00' }), '14:30\u2060–\u206018:00');
   assert.equal(describeRule(weekly({ end: { type: 'until', date: '2026-12-31' } })), 'Ogni martedì · dal 1\u00a0set\u00a02026 al 31\u00a0dic\u00a02026');
 });
+
+test('settimanale con orario diverso per ogni giorno (dayTimes)', async () => {
+  const { timeFor, describeTimes, describeEnd } = await import('../js/calendar.js');
+  const r = weekly({
+    weekdays: [1, 3], start: '2026-11-02',
+    dayTimes: { 1: { from: '09:00', to: '13:00' }, 3: { from: '14:00', to: '19:00' } },
+  });
+  assert.equal(ruleError(r), null);
+  assert.deepEqual(timeFor(r, '2026-11-02'), { from: '09:00', to: '13:00' });
+  assert.deepEqual(timeFor(r, '2026-11-04'), { from: '14:00', to: '19:00' });
+  const sched = scheduleBetween({ rules: [r], days: [] }, '2026-11-02', '2026-11-08', { studiosById: studios });
+  assert.deepEqual(sched.get('2026-11-02')[0].time, { from: '09:00', to: '13:00' });
+  assert.deepEqual(sched.get('2026-11-04')[0].time, { from: '14:00', to: '19:00' });
+  assert.equal(describeTimes(r), 'lun 9:00\u2060–\u206013:00, mer 14:00\u2060–\u206019:00');
+  assert.equal(describeRule(r), 'Ogni lunedì e mercoledì · lun 9:00\u2060–\u206013:00, mer 14:00\u2060–\u206019:00 · ' + describeEnd(r));
+  // stesso orario su tutti i giorni: una sola indicazione
+  const same = weekly({ weekdays: [1, 3], dayTimes: { 1: { from: '09:00', to: '13:00' }, 3: { from: '09:00', to: '13:00' } } });
+  assert.equal(describeTimes(same), '9:00\u2060–\u206013:00');
+  // un giorno senza orario: per quel giorno vale l'orario generale (qui nessuno)
+  assert.equal(timeFor(weekly({ weekdays: [1, 3], dayTimes: { 1: { from: '09:00', to: '13:00' } } }), '2026-11-04'), null);
+});
+
+test('dayTimes non validi vengono rifiutati', () => {
+  assert.equal(ruleError(weekly({ weekdays: [1], dayTimes: { 3: { from: '09:00', to: '13:00' } } })), CAL_MSG.time, 'giorno non scelto');
+  assert.equal(ruleError(weekly({ weekdays: [1], dayTimes: { 1: { from: '13:00', to: '09:00' } } })), CAL_MSG.time, 'fine prima dell\'inizio');
+  assert.equal(ruleError(weekly({ weekdays: [1], dayTimes: { 1: { from: '09:00' } } })), CAL_MSG.time, 'orario a metà');
+  assert.equal(ruleError(weekly({ weekdays: [1], dayTimes: [] })), CAL_MSG.time);
+  assert.equal(ruleError({ ...weekly(), type: 'monthly-date', monthDay: 5, dayTimes: { 1: { from: '09:00', to: '13:00' } } }), CAL_MSG.time);
+  assert.equal(ruleError(weekly({ dayTimes: null })), null, 'null equivale ad assente');
+});

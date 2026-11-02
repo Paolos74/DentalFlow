@@ -1151,6 +1151,17 @@ input[type="checkbox"].switch:checked::after { transform: translateX(20px); }
 .form-row .field-error, .form-row-hint { grid-column: 1 / -1; margin: 2px 0 6px; }
 .form-row-hint { color: var(--text-2); font-size: .8125rem; }
 .stepper-with-unit { display: inline-flex; align-items: center; gap: 8px; }
+/* orario per giorno nella ripetizione: "Lunedì  [9:00] – [13:00]" */
+.form-row.is-time-row { grid-template-columns: 3rem 1fr; }
+.form-row.is-time-row .form-row-control { justify-content: stretch; }
+.time-pair { display: flex; align-items: center; gap: 6px; width: 100%; }
+.time-pair input[type="time"] {
+  flex: 1 1 0; width: 0; min-width: 0; min-height: 36px; padding: 6px 6px; border: 0; border-radius: 8px;
+  background: var(--surface-2); color: var(--text); text-align: center; box-shadow: none; font-variant-numeric: tabular-nums;
+}
+#rule-daytimes .toolbar { padding: 8px 0 0; }
+.next-day-row .item-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cal-rules-hint { margin: 4px 4px 16px; }
 .form-group > .wd-pills { padding: 12px 10px; }
 fieldset.form-group { padding: 0; }
 

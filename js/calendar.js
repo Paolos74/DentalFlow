@@ -6,6 +6,8 @@
 //   yearly        month: 1..12, day: 1..31 (il 29 febbraio solo negli anni bisestili)
 //   end: {type:'never'} | {type:'until', date} | {type:'count', count}
 //   time: null | {from:'HH:MM', to:'HH:MM'} (solo informativo)
+//   dayTimes (solo weekly, facoltativo): {'1': {from, to}, '3': {from, to}} orario per giorno della settimana,
+//     vince su time per quel giorno (es. lunedì 9–13, mercoledì 14–19)
 // Giorno singolo: {id, studioId, date, time}
 import {
   isValidISODate, weekdayISO, lastDayOfMonth, addDays, daysBetween, formatDateShort, WEEKDAYS_LONG, MONTHS_LONG,
@@ -77,6 +79,12 @@ export function ruleError(r) {
   }
   const te = timeError(r.time);
   if (te) return te;
+  if (r.dayTimes !== undefined && r.dayTimes !== null) {
+    if (r.type !== 'weekly' || typeof r.dayTimes !== 'object' || Array.isArray(r.dayTimes)) return CAL_MSG.time;
+    for (const [k, v] of Object.entries(r.dayTimes)) {
+      if (!/^[1-7]$/.test(k) || !r.weekdays.includes(Number(k)) || v === null || timeError(v)) return CAL_MSG.time;
+    }
+  }
   if (r.exdates !== undefined && (!Array.isArray(r.exdates) || r.exdates.length > MAX_EXDATES
     || r.exdates.some((d) => !isValidISODate(d)))) return CAL_MSG.exdates;
   return null;
@@ -138,6 +146,20 @@ export function occurrences(rule, from, to) {
   return out;
 }
 
+/** Orario della regola in una data: quello del giorno della settimana (dayTimes) o quello generale. */
+export function timeFor(rule, iso) {
+  if (rule.type === 'weekly' && rule.dayTimes) {
+    const t = rule.dayTimes[String(weekdayISO(iso))];
+    if (t) return t;
+  }
+  return rule.time || null;
+}
+
+/** La regola ha orari diversi a seconda del giorno della settimana. */
+export function hasDayTimes(rule) {
+  return rule.type === 'weekly' && !!rule.dayTimes && Object.keys(rule.dayTimes).length > 0;
+}
+
 /** Prima data che soddisfa la regola (anche se esclusa), o null. */
 export function firstMatch(rule) {
   const all = occurrences({ ...rule, exdates: [] }, rule.start, addDays(rule.start, 3000));
@@ -178,7 +200,7 @@ export function scheduleBetween(cal, from, to, { studiosById } = {}) {
     if (r.deleted) continue;
     const s = usable(r.studioId);
     if (!s) continue;
-    for (const iso of occurrences(r, from, to)) add(iso, s, r.time, { type: 'rule', id: r.id });
+    for (const iso of occurrences(r, from, to)) add(iso, s, timeFor(r, iso), { type: 'rule', id: r.id });
   }
   for (const d of cal?.days || []) {
     if (d.deleted || d.date < from || d.date > to) continue;
@@ -271,7 +293,18 @@ export function describeEnd(rule) {
   return since;
 }
 
+/** Orari della regola: "9–13" oppure, con orari per giorno, "lun 9–13, mer 14–19". */
+export function describeTimes(rule) {
+  if (!hasDayTimes(rule)) return formatTime(rule.time);
+  const days = [...rule.weekdays].sort((a, b) => a - b);
+  const times = days.map((d) => rule.dayTimes[String(d)] || rule.time || null);
+  const key = (t) => (t ? `${t.from}-${t.to}` : '');
+  if (times.every((t) => key(t) === key(times[0]))) return formatTime(times[0]);
+  return days.map((d, i) => (times[i] ? `${WEEKDAYS_LONG[d - 1].slice(0, 3)} ${formatTime(times[i])}` : null))
+    .filter(Boolean).join(', ');
+}
+
 /** Riga completa: "Ogni martedì · 9:00–13:00 · dal 1 set 2026". */
 export function describeRule(rule) {
-  return [describePattern(rule), formatTime(rule.time), describeEnd(rule)].filter(Boolean).join(' · ');
+  return [describePattern(rule), describeTimes(rule), describeEnd(rule)].filter(Boolean).join(' · ');
 }

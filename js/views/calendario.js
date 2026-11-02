@@ -104,26 +104,11 @@ export function render(container, ctx) {
     container.append(dayPanel(ctx, state.selectedDay, sched.get(state.selectedDay) || [], missingByDate.get(state.selectedDay) || [], cal, studios));
   }
 
-  // ripetizioni
-  const rules = cal.rules.filter((r) => !state.studioId || r.studioId === state.studioId);
-  const byStudio = new Map();
-  for (const r of rules) byStudio.set(r.studioId, [...(byStudio.get(r.studioId) || []), r]);
-  const rulesCard = el('section', { class: 'card', id: 'cal-rules' },
-    el('div', { class: 'card-head' }, iconTile('repeat', 'red'), el('h3', { text: 'Ripetizioni' })));
-  if (rules.length === 0) rulesCard.append(el('p', { class: 'muted', text: 'Nessuna ripetizione. Esempio: ogni martedì da Studio Rossi.' }));
-  for (const [sid, list] of byStudio) {
-    const s = allStudios.find((x) => x.id === sid);
-    const ul = el('ul', { class: 'list grouped' });
-    for (const r of list) {
-      ul.append(el('li', {}, el('button', {
-        type: 'button', class: 'row', dataset: { rule: r.id }, onclick: () => ruleDialog(ctx, r),
-      }, el('span', { class: 'row-main' }, el('span', { class: 'row-title', text: describePattern(r) }),
-        el('span', { class: 'row-sub', text: describeRule(r).split(' · ').slice(1).join(' · ') })), icon('chevron'))));
-    }
-    rulesCard.append(el('h4', { class: 'group-title' }, s ? studioDot(s) : null, s ? s.name : 'Studio eliminato', s?.archived ? archivedBadge() : null), ul);
-  }
-  rulesCard.append(el('button', { type: 'button', class: 'btn btn-primary btn-block', id: 'cal-rule-new', onclick: () => ruleDialog(ctx, null) }, icon('plus'), 'Nuova ripetizione'));
-  container.append(rulesCard);
+  // le ripetizioni si gestiscono nella scheda di ogni studio (Altro → Studi)
+  const target = state.studioId ? `#altro/studi/${encodeURIComponent(state.studioId)}` : '#altro/studi';
+  container.append(el('p', { class: 'hint cal-rules-hint', id: 'cal-rules-hint' },
+    'I giorni che si ripetono si impostano nella scheda di ogni studio. ',
+    el('a', { href: target, class: 'btn-link', id: 'cal-open-studio', text: state.studioId ? 'Apri lo studio' : 'Vai a Studi' })));
 
   // giorni singoli
   const days = cal.days.filter((d) => !state.studioId || d.studioId === state.studioId);
@@ -265,15 +250,20 @@ function singleDaysDialog(ctx, dates, studios, onDone) {
 // ---------- foglio della ripetizione ----------
 const TYPES = [['weekly', 'Ogni settimana'], ['monthly-date', 'Ogni mese, stesso giorno'], ['monthly-pos', 'Ogni mese, es. il primo lunedì'], ['yearly', 'Ogni anno']];
 
-function ruleDialog(ctx, rule) {
+/**
+ * Foglio "Nuova/Modifica ripetizione". Si apre dalla scheda dello studio (studioId fisso).
+ * Ogni settimana: più giorni nella stessa ripetizione, ognuno con il suo orario facoltativo.
+ */
+export function ruleDialog(ctx, rule, { studioId } = {}) {
   const { store } = ctx;
   const all = store.getStudios({ includeArchived: true });
-  const choosable = all.filter((s) => !s.archived || s.id === rule?.studioId);
-  const startDefault = rule?.start || state.selectedDay || todayISO();
+  const fixedId = studioId || rule?.studioId;
+  const fixed = all.find((s) => s.id === fixedId);
+  const startDefault = rule?.start || todayISO();
   const wd0 = weekdayISO(startDefault);
   const day0 = Number(startDefault.slice(8, 10));
 
-  const studio = el('select', { id: 'rule-studio' }, choosable.map((s) => el('option', { value: s.id, text: studioLabel(s), selected: s.id === (rule?.studioId || state.studioId) })));
+  const studio = el('input', { type: 'hidden', id: 'rule-studio', value: fixedId || '' });
   const type = el('select', { id: 'rule-type' }, TYPES.map(([v, l]) => el('option', { value: v, text: l, selected: v === (rule?.type || 'weekly') })));
   const wdBoxes = WEEKDAYS_LONG.map((name, i) => el('input', { type: 'checkbox', value: String(i + 1), checked: rule?.type === 'weekly' ? rule.weekdays.includes(i + 1) : i + 1 === wd0 }));
   const interval = el('input', { type: 'number', id: 'rule-interval', min: '1', max: '52', inputmode: 'numeric', value: String(rule?.interval || 1), 'aria-label': 'Ogni quante settimane' });
@@ -288,6 +278,36 @@ function ruleDialog(ctx, rule) {
   const count = el('input', { type: 'number', id: 'rule-count', min: '1', max: '999', inputmode: 'numeric', value: String(rule?.end?.type === 'count' ? rule.end.count : 10) });
   const t = timeInputs('rule-time', rule?.time);
   const preview = el('p', { class: 'group-note rule-preview', id: 'rule-preview', 'aria-live': 'polite' });
+
+  // orario per ogni giorno della settimana (solo "Ogni settimana")
+  const dayTime = (d) => (rule?.type === 'weekly' ? rule.dayTimes?.[String(d)] || rule.time : null) || null;
+  const dayRows = WEEKDAYS_LONG.map((name, i) => {
+    const d = i + 1;
+    const from = el('input', { type: 'time', id: `rule-dt-${d}-from`, value: dayTime(d)?.from || '', step: '300', 'aria-label': `${name}, dalle` });
+    const to = el('input', { type: 'time', id: `rule-dt-${d}-to`, value: dayTime(d)?.to || '', step: '300', 'aria-label': `${name}, alle` });
+    // etichetta corta (Lun, Mer…) così i due orari hanno spazio anche su un telefono stretto
+    const row = groupRow(name.charAt(0).toUpperCase() + name.slice(1, 3),
+      el('span', { class: 'time-pair' }, from, el('span', { class: 'muted', 'aria-hidden': 'true', text: '–' }), to));
+    row.wrap.classList.add('is-time-row');
+    row.wrap.querySelector('label').htmlFor = from.id;
+    return { d, from, to, row };
+  });
+  const copyBtn = el('button', {
+    type: 'button', class: 'btn btn-small btn-secondary', id: 'rule-dt-copy', text: 'Stesso orario per tutti i giorni',
+    onclick: () => {
+      const shown = dayRows.filter((x) => wdBoxes[x.d - 1].checked);
+      const src = shown.find((x) => x.from.value || x.to.value);
+      if (!src) return;
+      for (const x of shown) { x.from.value = src.from.value; x.to.value = src.to.value; }
+      refresh();
+    },
+  });
+  const dayTimesBlock = el('div', { class: 'rule-group', id: 'rule-daytimes' },
+    sectionHead('Orari (facoltativi)'),
+    formGroup(...dayRows.map((x) => x.row.wrap)),
+    el('div', { class: 'toolbar' }, copyBtn),
+    groupNote('Ogni giorno può avere il suo orario. Solo informativo: compare in Oggi e nel calendario.'));
+  const timeBlocks = el('div', { class: 'rule-group', id: 'rule-time-general' }, ...t.blocks);
 
   const intervalRow = groupRow('Ogni', el('span', { class: 'stepper-with-unit' },
     stepper(interval, { label: 'una settimana', min: 1, max: 52 }), el('span', { class: 'muted', text: 'sett.' })));
@@ -313,6 +333,12 @@ function ruleDialog(ctx, rule) {
     if (ty === 'weekly') {
       input.weekdays = wdBoxes.filter((b) => b.checked).map((b) => Number(b.value));
       input.interval = Number(interval.value);
+      input.time = null;
+      input.dayTimes = {};
+      for (const x of dayRows) {
+        if (!input.weekdays.includes(x.d) || (!x.from.value && !x.to.value)) continue;
+        input.dayTimes[String(x.d)] = { from: x.from.value, to: x.to.value };
+      }
     } else if (ty === 'monthly-date') input.monthDay = Number(monthDay.value);
     else if (ty === 'monthly-pos') Object.assign(input, { nth: Number(nth.value), weekday: Number(posWd.value) });
     else Object.assign(input, { day: Number(yDay.value), month: Number(yMonth.value) });
@@ -322,6 +348,15 @@ function ruleDialog(ctx, rule) {
   };
   const refresh = () => {
     for (const [k, g] of Object.entries(groups)) g.hidden = k !== type.value;
+    const weeklyType = type.value === 'weekly';
+    dayTimesBlock.hidden = !weeklyType;
+    timeBlocks.hidden = weeklyType;
+    let shownDays = 0;
+    for (const x of dayRows) {
+      x.row.wrap.hidden = !wdBoxes[x.d - 1].checked;
+      if (!x.row.wrap.hidden) shownDays += 1;
+    }
+    copyBtn.hidden = shownDays < 2;
     untilField.wrap.hidden = endType.value !== 'until';
     countField.wrap.hidden = endType.value !== 'count';
     const r = { ...read(), exdates: rule?.exdates || [] };
@@ -339,9 +374,12 @@ function ruleDialog(ctx, rule) {
     title: rule ? 'Modifica ripetizione' : 'Nuova ripetizione',
     submitText: rule ? 'Salva' : 'Aggiungi',
     build: (form) => {
-      form.append(formGroup(groupRow('Studio', studio).wrap, groupRow('Si ripete', type).wrap), ...Object.values(groups),
+      form.append(studio,
+        fixed ? el('p', { class: 'sheet-intro' }, studioDot(fixed), ` ${fixed.name}`) : null,
+        formGroup(groupRow('Si ripete', type).wrap), ...Object.values(groups),
+        dayTimesBlock, timeBlocks,
         sectionHead('Durata'), formGroup(groupRow('Dal', start).wrap, groupRow('Fine', endType).wrap, untilField.wrap, countField.wrap),
-        preview, ...t.blocks);
+        preview);
       form.addEventListener('input', refresh);
       form.addEventListener('change', refresh);
       refresh();
@@ -386,7 +424,7 @@ async function icsDialog(ctx) {
   const studiosById = Object.fromEntries(store.getStudios({ includeArchived: true }).map((s) => [s.id, s]));
   if (cal.rules.length + cal.days.length === 0) { toast('Il calendario è vuoto', { type: 'error' }); return; }
   const text = buildIcs({ rules: cal.rules, days: cal.days, studiosById });
-  const file = new File([text], 'DentalFlow-calendario.ics', { type: 'text/calendar;charset=utf-8' });
+  const file = new File([text], 'DentalFlow-calendario.ics', { type: 'text/calendar' });
   const canShare = canShareFile(file);
   const choice = await choiceDialog({
     title: 'Esporta nel calendario del telefono',

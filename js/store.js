@@ -396,6 +396,18 @@ export function createStore(deps) {
     if (i.type === 'weekly') {
       base.weekdays = Array.isArray(i.weekdays) ? [...new Set(i.weekdays)].sort((a, b) => a - b) : i.weekdays;
       base.interval = i.interval ?? 1;
+      // orario per giorno della settimana (facoltativo): solo i giorni scelti, senza le righe vuote
+      if (i.dayTimes && typeof i.dayTimes === 'object' && !Array.isArray(i.dayTimes)) {
+        const dt = {};
+        for (const [k, v] of Object.entries(i.dayTimes)) {
+          if (!v || (!v.from && !v.to)) continue;
+          if (Array.isArray(base.weekdays) && !base.weekdays.includes(Number(k))) continue;
+          dt[k] = { from: v.from, to: v.to };
+        }
+        if (Object.keys(dt).length) base.dayTimes = dt;
+      } else if (i.dayTimes !== undefined && i.dayTimes !== null) {
+        base.dayTimes = i.dayTimes; // tipo sbagliato: lo rifiuta ruleError
+      }
     } else if (i.type === 'monthly-date') base.monthDay = i.monthDay;
     else if (i.type === 'monthly-pos') Object.assign(base, { nth: i.nth, weekday: i.weekday });
     else if (i.type === 'yearly') Object.assign(base, { month: i.month, day: i.day });

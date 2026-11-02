@@ -1,5 +1,5 @@
 // Service worker di DentalFlow. Aumenta VERSION a ogni rilascio: comparirà il banner "Aggiorna".
-const VERSION = 'dentalflow-v6';
+const VERSION = 'dentalflow-v9';
 
 const ASSETS = [
   './',
@@ -9,6 +9,7 @@ const ASSETS = [
   'css/app.css',
   'js/app.js',
   'js/escape.js',
+  'js/firebase-config.js',
   'js/ui.js',
   'js/money.js',
   'js/dates.js',

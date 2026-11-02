@@ -225,3 +225,32 @@ test('sincronizzazione: i record nuovi viaggiano con i loro tipi', () => {
   // un record di calendario non valido arrivato dalla rete viene ignorato
   assert.equal(other.applyRemote([{ kind: 'rule', data: { id: 'bad', studioId: a, type: 'weekly', weekdays: [], interval: 1, start: '2026-01-05', end: { type: 'never' }, createdAt: 1 }, updatedAt: 5, deleted: false }]), 0);
 });
+
+test('ripetizione con più giorni e orari diversi: salvata pulita, modificabile, sopravvive al ricaricamento e al backup', async () => {
+  const { buildBackup, parseBackupText } = await import('../js/backup.js');
+  const { store, storage, a } = setup();
+  const id = store.addRule({
+    studioId: a, type: 'weekly', weekdays: [1, 3], interval: 1, start: '2026-11-02', end: { type: 'never' }, time: null,
+    dayTimes: { 1: { from: '09:00', to: '13:00' }, 3: { from: '14:00', to: '19:00' }, 5: { from: '08:00', to: '12:00' }, 2: { from: '', to: '' } },
+  });
+  let r = store.getCalendar().rules.find((x) => x.id === id);
+  assert.deepEqual(r.dayTimes, { 1: { from: '09:00', to: '13:00' }, 3: { from: '14:00', to: '19:00' } }, 'solo i giorni scelti, senza righe vuote');
+  // orario a metà: errore, niente salvato
+  assert.throws(() => store.updateRule(id, { dayTimes: { 1: { from: '09:00', to: '' } } }), ValidationError);
+  // togliere il mercoledì toglie anche il suo orario
+  store.updateRule(id, { weekdays: [1] });
+  r = store.getCalendar().rules.find((x) => x.id === id);
+  assert.deepEqual(r.dayTimes, { 1: { from: '09:00', to: '13:00' } });
+  // dayTimes vuoto = nessun orario per giorno
+  store.updateRule(id, { weekdays: [1, 3], dayTimes: { 3: { from: '14:00', to: '19:00' } } });
+  const reloaded = makeStore(storage);
+  r = reloaded.getCalendar().rules.find((x) => x.id === id);
+  assert.deepEqual(r.dayTimes, { 3: { from: '14:00', to: '19:00' } });
+  // un singolo giorno si toglie senza toccare gli altri
+  store.unscheduleDay('2026-11-04', a);
+  assert.deepEqual(store.getCalendar().rules.find((x) => x.id === id).exdates, ['2026-11-04']);
+  // il backup conserva gli orari per giorno
+  const parsed = parseBackupText(JSON.stringify(buildBackup(store.exportData())));
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.deepEqual(parsed.data.calendar.rules.find((x) => x.id === id).dayTimes, { 3: { from: '14:00', to: '19:00' } });
+});

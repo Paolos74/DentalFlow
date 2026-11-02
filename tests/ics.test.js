@@ -44,3 +44,32 @@ test('testo protetto e righe piegate a 75 byte', () => {
   for (const part of folded.split('\r\n')) assert.ok(new TextEncoder().encode(part).length <= 75);
   assert.equal(folded.split('\r\n').map((p, i) => (i ? p.slice(1) : p)).join(''), long);
 });
+
+test('orari diversi per giorno: un evento per orario, COUNT diventa UNTIL, date escluse sul giorno giusto', async () => {
+  const { splitByTime } = await import('../js/ics.js');
+  const r = {
+    ...base, weekdays: [1, 3], start: '2026-11-02', end: { type: 'count', count: 4 },
+    dayTimes: { 1: { from: '09:00', to: '13:00' }, 3: { from: '14:00', to: '19:00' } },
+    exdates: ['2026-11-04'],
+  };
+  const parts = splitByTime(r);
+  assert.equal(parts.length, 2);
+  assert.deepEqual(parts.map((p) => p.rule.weekdays), [[1], [3]]);
+  // 4 volte: 2/11, 4/11, 9/11, 11/11 → fine al 11/11 per entrambi gli eventi
+  assert.deepEqual(parts.map((p) => p.rule.end), [{ type: 'until', date: '2026-11-11' }, { type: 'until', date: '2026-11-11' }]);
+  const ics = buildIcs({ rules: [r], studiosById: studios, now: Date.UTC(2026, 10, 2) });
+  const lines = ics.split('\r\n');
+  assert.equal(lines.filter((l) => l === 'BEGIN:VEVENT').length, 2);
+  assert.ok(lines.includes('DTSTART:20261102T090000'));
+  assert.ok(lines.includes('DTEND:20261102T130000'));
+  assert.ok(lines.includes('DTSTART:20261104T140000'));
+  assert.ok(lines.includes('RRULE:FREQ=WEEKLY;BYDAY=MO;WKST=MO;UNTIL=20261111T235959'));
+  assert.ok(lines.includes('RRULE:FREQ=WEEKLY;BYDAY=WE;WKST=MO;UNTIL=20261111T235959'));
+  assert.ok(lines.includes('EXDATE:20261104T140000'), 'la data esclusa va solo sull\'evento del mercoledì');
+  assert.equal(lines.filter((l) => l.startsWith('EXDATE')).length, 1);
+  assert.equal(lines.filter((l) => l.startsWith('UID:')).length, new Set(lines.filter((l) => l.startsWith('UID:'))).size, 'UID distinti');
+  // stesso orario su tutti i giorni: un solo evento, come prima
+  const same = { ...r, end: { type: 'never' }, dayTimes: { 1: { from: '09:00', to: '13:00' }, 3: { from: '09:00', to: '13:00' } } };
+  assert.equal(splitByTime(same).length, 1);
+  assert.equal(splitByTime(same)[0].uid, 'w');
+});
