@@ -1,7 +1,9 @@
 // Inserimento della giornata: per data e studio, pazienti e importo totale per ogni trattamento.
 // Lo studio previsto dal calendario è preselezionato; una giornata già registrata si modifica qui.
+// Nella lista ci sono solo i trattamenti scelti (o già salvati): "Aggiungi trattamento" apre l'elenco
+// con ricerca, la ✕ toglie una riga (se salvata la elimina subito, con "Annulla").
 import {
-  el, clear, toast, showError, isUserError, confirmDialog, checkboxDialog, chipGroup, noteBadge,
+  el, clear, toast, showError, isUserError, confirmDialog, checkboxDialog, chipGroup, noteBadge, pickDialog, undoToast,
   pageHeader, emptyState, icon, iconButton, stepper, groupRow, formGroup, archivedBadge, autoGrow,
 } from '../ui.js';
 import { todayISO, isValidISODate, formatLong, formatDayTitle, addDays } from '../dates.js';
@@ -72,7 +74,33 @@ function isDirty() {
   }));
 }
 
-const rowsOf = (tid) => (state.rows[tid] ||= [{ id: null, patients: '0', amountText: '' }]);
+/**
+ * Allinea la bozza ai dati salvati della giornata senza perdere i valori non salvati:
+ * toglie le righe eliminate altrove (o con la ✕) e aggiunge quelle comparse (es. dopo "Annulla").
+ */
+function reconcile(store) {
+  if (!state.studioId || !isValidISODate(state.date)) return;
+  const entries = store.getEntries({ from: state.date, to: state.date, studioId: state.studioId })
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const live = new Map(entries.map((e) => [e.id, e]));
+  const inDraft = new Set();
+  for (const [tid, list] of Object.entries(state.rows)) {
+    const kept = list.filter((r) => !r.id || live.has(r.id));
+    kept.forEach((r) => { if (r.id) inDraft.add(r.id); });
+    if (kept.length) state.rows[tid] = kept; else delete state.rows[tid];
+  }
+  for (const e of entries) {
+    if (inDraft.has(e.id)) continue;
+    (state.rows[e.treatmentId] ||= []).push({ id: e.id, patients: String(e.patients), amountText: formatEuroCsv(e.amountCents), saved: e });
+  }
+}
+
+/** Aggiunge un trattamento alla giornata con 1 paziente; il cursore va sull'incasso. */
+function addToDraft(tid) {
+  if (!state.rows[tid]?.length) state.rows[tid] = [{ id: null, patients: '1', amountText: '' }];
+  state.errors = { rows: {}, form: null };
+  state.focusId = `ins-amt-${tid}`;
+}
 
 export function render(container, ctx) {
   const { store } = ctx;
@@ -114,6 +142,7 @@ export function render(container, ctx) {
   }
   if (state.studioId && !studios.some((s) => s.id === state.studioId)) state.studioId = null;
   if (state.key !== keyOf()) loadDraft(store);
+  else reconcile(store);
 
   container.append(renderHead(ctx, studios, planned));
 
@@ -138,11 +167,11 @@ export function render(container, ctx) {
   }
 
   const all = store.getTreatments();
-  const withRows = new Set(Object.keys(state.rows).filter((tid) => state.rows[tid].some((r) => r.id)));
-  const visible = all.filter((t) => t.studios[state.studioId] === 'active' || withRows.has(t.id));
-  const since = addDays(todayISO(), -USAGE_DAYS);
-  const ordered = usageOrder(visible, store.getEntries({ from: since, studioId: state.studioId }), { studioId: state.studioId, since });
-  if (ordered.length === 0) {
+  const byId = new Map(all.map((t) => [t.id, t]));
+  // solo i trattamenti scelti, nell'ordine in cui sono stati aggiunti (o salvati)
+  const chosen = Object.keys(state.rows).filter((tid) => state.rows[tid]?.length).map((tid) => byId.get(tid)).filter(Boolean);
+  const activeHere = all.filter((t) => t.studios[state.studioId] === 'active');
+  if (chosen.length === 0 && activeHere.length === 0) {
     container.append(el('div', { class: 'card' }, emptyState({
       iconName: 'tooth', color: 'mint', title: 'Nessun trattamento',
       text: 'In questo studio non hai ancora trattamenti attivi.',
@@ -150,7 +179,12 @@ export function render(container, ctx) {
     })));
     return;
   }
-  container.append(renderForm(ctx, ordered));
+  container.append(renderForm(ctx, chosen, activeHere));
+  if (state.focusId) {
+    const f = document.getElementById(state.focusId);
+    state.focusId = null;
+    if (f) { f.focus(); f.scrollIntoView({ block: 'center' }); }
+  }
 }
 
 function renderHead(ctx, studios, planned) {
@@ -202,19 +236,46 @@ function renderHead(ctx, studios, planned) {
   return el('div', { class: 'card ins-head' }, dateBox, studioBox);
 }
 
-function renderForm(ctx, treatments) {
+/** Elenco con ricerca dei trattamenti dello studio non ancora nella giornata, in ordine d'uso. */
+async function pickTreatment(ctx, activeHere) {
+  const { store } = ctx;
+  const since = addDays(todayISO(), -USAGE_DAYS);
+  const free = activeHere.filter((t) => !state.rows[t.id]?.length);
+  const ordered = usageOrder(free, store.getEntries({ from: since, studioId: state.studioId }), { studioId: state.studioId, since });
+  const studio = store.getStudios({ includeArchived: true }).find((s) => s.id === state.studioId);
+  const OTHER = '__altri__';
+  const choice = await pickDialog({
+    title: 'Aggiungi trattamento', subtitle: studio?.name, idPrefix: 'ins-pick',
+    options: ordered.map((t) => ({ value: t.id, label: t.name })),
+    searchPlaceholder: 'Cerca un trattamento',
+    emptyText: ordered.length ? 'Nessun trattamento con questo nome in questo studio.' : 'Hai già aggiunto tutti i trattamenti di questo studio.',
+    footer: { label: 'Altri trattamenti o nuovo…', value: OTHER },
+  });
+  if (!choice) return;
+  if (choice === OTHER) { quickAddTreatment(ctx); return; }
+  addToDraft(choice);
+  ctx.rerender();
+}
+
+function renderForm(ctx, treatments, activeHere) {
   const { store } = ctx;
   const form = el('form', { class: 'card form', novalidate: true, id: 'ins-form' });
   const editing = Object.values(state.rows).some((list) => list.some((r) => r.id));
   if (editing) {
     form.append(el('p', { class: 'status-line', id: 'ins-editing', role: 'status' }, icon('check'), 'Giornata già registrata: stai modificando i valori salvati.'));
   }
-  // una riga per trattamento: nome a sinistra, stepper a destra; l'importo compare solo con pazienti > 0
-  form.append(el('div', { class: 'treat-head', 'aria-hidden': 'true' }, el('span', { text: 'Trattamento' }), el('span', { text: 'Pazienti' })));
+  // una riga per trattamento scelto: nome, stepper e ✕; l'importo compare con pazienti > 0
+  if (treatments.length) {
+    form.append(el('div', { class: 'treat-head', 'aria-hidden': 'true' }, el('span', { text: 'Trattamento' }), el('span', { text: 'Pazienti' })));
+  } else {
+    form.append(el('div', { class: 'treat-empty', id: 'ins-treat-empty' },
+      el('p', { class: 'treat-empty-title', text: 'Quali trattamenti hai fatto?' }),
+      el('p', { class: 'muted', text: 'Aggiungi solo quelli della giornata: gli altri non compaiono.' })));
+  }
 
   for (const t of treatments) {
     const active = t.studios[state.studioId] === 'active';
-    const list = rowsOf(t.id);
+    const list = state.rows[t.id];
     const block = el('div', { class: 'treat-row', dataset: { treatment: t.name } });
     list.forEach((d, i) => {
       const suffix = i === 0 ? '' : `-${i}`;
@@ -247,8 +308,14 @@ function renderForm(ctx, treatments) {
           el('span', { class: 'treat-name-text' }, el('span', { text: t.name }), active ? null : archivedBadge('Archiviato qui')),
           list.some((r) => r.id) ? icon('check', 'treat-saved') : null)
         : el('span', { class: 'treat-name is-extra', text: `Riga ${i + 1}${d.id ? ' · salvata' : ''}` });
+      const removeBtn = el('button', {
+        type: 'button', class: 'treat-remove', id: `ins-rm-${t.id}${suffix}`,
+        'aria-label': d.id ? `Elimina ${rowLabel} (già salvato)` : `Togli ${rowLabel}`,
+        title: d.id ? 'Elimina' : 'Togli',
+        onclick: () => removeLine(ctx, t, list, i),
+      }, icon('xmark'));
       block.append(el('div', { class: `treat-line${i ? ' is-extra' : ''}` },
-        el('div', { class: 'treat-main' }, name, step),
+        el('div', { class: 'treat-main' }, name, el('span', { class: 'treat-controls' }, step, removeBtn)),
         amountLine,
         more,
         err ? el('p', { class: 'field-error', role: 'alert', text: err }) : null));
@@ -258,9 +325,9 @@ function renderForm(ctx, treatments) {
   }
 
   form.append(el('button', {
-    type: 'button', class: 'btn btn-link ins-add', id: 'ins-add-treatment',
-    onclick: () => quickAddTreatment(ctx),
-  }, icon('plus-circle'), 'Aggiungi un trattamento'));
+    type: 'button', class: `btn ${treatments.length ? 'btn-link' : 'btn-primary btn-block'} ins-add`, id: 'ins-add-treatment',
+    onclick: () => pickTreatment(ctx, activeHere),
+  }, icon('plus-circle'), 'Aggiungi trattamento'));
 
   // nota della giornata
   const noteArea = el('textarea', { id: 'ins-note', rows: '3', maxlength: String(MAX_NOTE), placeholder: 'Es. pagati in contanti, manca fattura…' });
@@ -333,7 +400,9 @@ async function save(ctx, treatments) {
   state.errors = { rows: errors, form: null };
   if (Object.keys(errors).length === 0) {
     if (!isValidISODate(state.date)) state.errors.form = 'Data non valida';
-    else if (rows.length === 0 && deleteIds.length === 0 && !noteChanged) state.errors.form = 'Inserisci almeno un paziente';
+    else if (rows.length === 0 && deleteIds.length === 0 && !noteChanged) {
+      state.errors.form = treatments.length ? 'Inserisci almeno un paziente' : 'Aggiungi almeno un trattamento';
+    }
   }
   if (Object.keys(errors).length > 0 || state.errors.form) {
     ctx.rerender();
@@ -370,6 +439,27 @@ async function save(ctx, treatments) {
   toast(parts.length ? `Giornata salvata: ${parts.join(', ')}` : 'Nessuna modifica');
 }
 
+/**
+ * ✕ su una riga: se non è salvata la toglie dalla bozza; se è salvata la elimina subito,
+ * con "Annulla" nel messaggio (reconcile la rimette nella bozza se annullata).
+ */
+function removeLine(ctx, t, list, i) {
+  const d = list[i];
+  state.errors = { rows: {}, form: null };
+  if (!d.id) {
+    list.splice(i, 1);
+    if (list.length === 0) delete state.rows[t.id];
+    ctx.rerender();
+    return;
+  }
+  try {
+    const removed = ctx.store.deleteEntry(d.id);
+    undoToast(ctx.store, `${t.name} eliminato (${plural(d.saved.patients, 'paziente', 'pazienti')}, ${formatEuro(d.saved.amountCents)})`, removed);
+  } catch (err) {
+    showError(err);
+  }
+}
+
 function quickAddTreatment(ctx) {
   const { store } = ctx;
   const studioId = state.studioId;
@@ -395,9 +485,13 @@ function quickAddTreatment(ctx) {
       fName.setError('');
       const n = name.value.trim();
       if (!n && ids.length === 0) { setFormError('Scegli un trattamento o scrivi il nome di uno nuovo'); return false; }
-      if (n) store.addTreatment(n, [studioId]);
-      for (const id of ids) store.addTreatmentToStudios(id, [studioId]);
-      const count = ids.length + (n ? 1 : 0);
+      if (n) ids.push(store.addTreatment(n, [studioId]));
+      for (const id of ids) {
+        if (store.getTreatments().find((x) => x.id === id)?.studios[studioId] !== 'active') store.addTreatmentToStudios(id, [studioId]);
+        if (studioId === state.studioId) addToDraft(id);
+      }
+      ctx.rerender();
+      const count = ids.length;
       toast(count === 1 ? 'Trattamento aggiunto allo studio' : `${count} trattamenti aggiunti allo studio`);
       return true;
     },

@@ -10,7 +10,7 @@ import * as riepilogo from './views/riepilogo.js';
 import * as gestione from './views/gestione.js';
 import * as calendario from './views/calendario.js';
 
-// Rotte: #oggi, #inserisci, #registro, #recap[/grafici], #altro[/pagina[/id]], #calendario[?studio=id].
+// Rotte: #oggi, #inserisci, #registro, #recap[/grafici|/tasse], #altro[/pagina[/id]], #calendario[?studio=id].
 const routes = { oggi, inserisci, registro, recap: riepilogo, altro: gestione, calendario };
 // Indirizzi della prima versione: restano validi (segnalibri, icone installate).
 const LEGACY = { riepilogo: 'recap', grafici: 'recap/grafici', gestione: 'altro' };

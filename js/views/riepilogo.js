@@ -1,5 +1,5 @@
 // Recap: numeri chiave del periodo con confronto, studi, trattamenti, giornate, anno; esportazione CSV.
-// La sezione Grafici (#recap/grafici) è in grafici.js.
+// Le sezioni Grafici (#recap/grafici) e Tasse (#recap/tasse) sono in grafici.js e tasse.js.
 import {
   el, clear, periodNav, resolveNav, studioLabel, downloadBlob, canShareFile, shareFile, toast, newNav, formDialog,
   checkboxDialog, studioDot, showError, filesDialog, pageHeader, emptyState, iconTile, checkRow, sectionHead,
@@ -15,6 +15,8 @@ import {
 } from '../dates.js';
 import { hasSchedule, missingDays, scheduleBetween, earliestDate } from '../calendar.js';
 import * as grafici from './grafici.js';
+import * as tasse from './tasse.js';
+import { BOLLO_SOGLIA } from '../tax.js';
 import { missingList } from './oggi.js';
 import { studioColorKey } from '../colors.js';
 
@@ -24,7 +26,8 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 function segmentedLinks(active) {
   return el('nav', { class: 'seg-links', 'aria-label': 'Sezioni del recap' },
     el('a', { href: '#recap', id: 'recap-tab-numeri', 'aria-current': active === 'numeri' ? 'page' : null, text: 'Numeri' }),
-    el('a', { href: '#recap/grafici', id: 'recap-tab-grafici', 'aria-current': active === 'grafici' ? 'page' : null, text: 'Grafici' }));
+    el('a', { href: '#recap/grafici', id: 'recap-tab-grafici', 'aria-current': active === 'grafici' ? 'page' : null, text: 'Grafici' }),
+    el('a', { href: '#recap/tasse', id: 'recap-tab-tasse', 'aria-current': active === 'tasse' ? 'page' : null, text: 'Tasse' }));
 }
 
 function changeText(cur, prev, prevLabel) {
@@ -79,11 +82,15 @@ function previousLabel(nav) {
 
 export function render(container, ctx) {
   clear(container);
-  const sub = ctx.path?.[0] === 'grafici' ? 'grafici' : 'numeri';
+  const sub = ['grafici', 'tasse'].includes(ctx.path?.[0]) ? ctx.path[0] : 'numeri';
   container.append(pageHeader({ title: 'Recap' }));
   container.append(segmentedLinks(sub));
   if (sub === 'grafici') {
     grafici.renderInto(container, ctx);
+    return;
+  }
+  if (sub === 'tasse') {
+    tasse.renderInto(container, ctx);
     return;
   }
   const params = ctx.takeParams?.();
@@ -326,21 +333,45 @@ async function studioSheet(ctx, s, { range, toToday, due, duePeriod, cents }) {
 }
 
 // ---------- incassi ----------
-/** Foglio "Incassi": tutti i mesi dello studio con inserimenti fino a oggi, prima quelli da incassare. */
+/**
+ * Foglio "Incassi": tutti i mesi dello studio con inserimenti fino a oggi, prima quelli da incassare.
+ * Per i mesi oltre 77,47 € una seconda spunta, visibile solo se il mese è pagato: marca da bollo addebitata
+ * (conta come ricavo nella stima delle tasse).
+ */
 function paymentsDialog(ctx, studio, entries) {
   const { store } = ctx;
-  const months = paymentMonths(entries, store.getPayments(), studio.id);
+  const payments = store.getPayments();
+  const months = paymentMonths(entries, payments, studio.id);
   if (months.length === 0) { toast('Nessun inserimento per questo studio'); return; }
-  checkboxDialog({
+  const bolloOf = new Map(payments.filter((p) => p.studioId === studio.id).map((p) => [p.month, p.bollo === true]));
+  const bolloText = formatEuro(tasse.taxParams(ctx).bollo);
+  const rows = months.map((m) => {
+    const paid = el('input', { type: 'checkbox', value: m.month, id: `pay-${m.month}`, checked: m.paid });
+    const needsBollo = m.cents > BOLLO_SOGLIA;
+    const bollo = needsBollo ? el('input', { type: 'checkbox', id: `pay-bollo-${m.month}`, checked: m.paid && bolloOf.get(m.month) === true }) : null;
+    const bolloRow = needsBollo ? el('label', { class: 'check check-bollo' }, bollo,
+      el('span', { class: 'check-label' }, el('span', { class: 'check-sub', text: `Marca da bollo ${bolloText} pagata dallo studio` }))) : null;
+    const refresh = () => {
+      if (!bolloRow) return;
+      bolloRow.hidden = !paid.checked;
+      if (!paid.checked) bollo.checked = false;
+    };
+    paid.addEventListener('change', refresh);
+    refresh();
+    const main = checkRow(paid, el('span', { text: capitalize(monthLabel(m.month)) }), el('span', { class: 'muted check-value', text: formatEuro(m.cents) }));
+    return { m, paid, bollo, nodes: [main, bolloRow].filter(Boolean) };
+  });
+  formDialog({
     title: 'Incassi',
     subtitle: studio.name,
-    intro: 'Mesi pagati',
-    note: 'Spunta i mesi che lo studio ti ha già pagato: gli altri restano da incassare. In alto quelli ancora da incassare.',
-    options: months.map((m) => ({ value: m.month, label: capitalize(monthLabel(m.month)), detail: formatEuro(m.cents), checked: m.paid })),
     submitText: 'Salva',
-    onSubmit: (ids) => {
-      const set = new Set(ids);
-      store.setPaid(months.map((m) => ({ month: m.month, studioId: studio.id, paid: set.has(m.month) })));
+    build: (form) => form.append(
+      sectionHead('Mesi pagati'),
+      el('div', { class: 'checklist', id: 'pay-list' }, rows.flatMap((r) => r.nodes)),
+      el('p', { class: 'group-note', text: 'Spunta i mesi che lo studio ti ha già pagato: gli altri restano da incassare. '
+        + 'Se lo studio ti ha pagato anche la marca da bollo (fatture oltre 77,47 €), spunta anche quella: conta come ricavo nelle tasse.' })),
+    onSubmit: () => {
+      store.setPaid(rows.map((r) => ({ month: r.m.month, studioId: studio.id, paid: r.paid.checked, bollo: !!r.bollo?.checked })));
       toast('Incassi aggiornati');
       return true;
     },

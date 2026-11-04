@@ -7,11 +7,11 @@ const DAY = 86400000;
 
 test('preferenze: valori predefiniti, valori non validi ignorati', () => {
   const st = memStorage();
-  assert.deepEqual(readPrefs(st), { theme: 'light', csvFormat: 'virgola', lastBackupAt: null });
+  assert.deepEqual(readPrefs(st), { theme: 'light', csvFormat: 'virgola', lastBackupAt: null, tax: null });
   writePrefs(st, { theme: 'dark' });
   assert.equal(readPrefs(st).theme, 'dark');
   st.setItem(PREFS_KEY, JSON.stringify({ theme: 'viola', lastBackupAt: -1, csvFormat: 'excel' }));
-  assert.deepEqual(readPrefs(st), { theme: 'light', csvFormat: 'excel', lastBackupAt: null });
+  assert.deepEqual(readPrefs(st), { theme: 'light', csvFormat: 'excel', lastBackupAt: null, tax: null });
   st.setItem(PREFS_KEY, '{rotto');
   assert.equal(readPrefs(st).theme, 'light');
   assert.equal(writePrefs(memStorage({}, { failSet: () => true }), { theme: 'auto' }), false);
@@ -33,4 +33,14 @@ test('copia di sicurezza prima dell\'importazione', () => {
   assert.deepEqual(readBeforeImport(st), { savedAt: 123, backup: { app: 'DentalFlow' } });
   assert.equal(clearBeforeImport(st), true);
   assert.equal(readBeforeImport(st), null);
+});
+
+test('parametri delle tasse nelle preferenze: salvati, valori errati corretti', () => {
+  const st = memStorage();
+  writePrefs(st, { tax: { coeff: 7800, inps: 2400, rate: 500, bollo: 200 } });
+  assert.deepEqual(readPrefs(st).tax, { coeff: 7800, inps: 2400, rate: 500, bollo: 200, openDate: null });
+  st.setItem(PREFS_KEY, JSON.stringify({ tax: { coeff: 'x', inps: 2400 } }));
+  assert.deepEqual(readPrefs(st).tax, { coeff: 7800, inps: 2400, rate: 500, bollo: 200, openDate: null });
+  st.setItem(PREFS_KEY, JSON.stringify({ tax: [1] }));
+  assert.equal(readPrefs(st).tax, null);
 });

@@ -254,3 +254,46 @@ test('ripetizione con più giorni e orari diversi: salvata pulita, modificabile,
   assert.equal(parsed.ok, true, parsed.error);
   assert.deepEqual(parsed.data.calendar.rules.find((x) => x.id === id).dayTimes, { 3: { from: '14:00', to: '19:00' } });
 });
+
+test('incassi con marca da bollo: salvata solo se il mese è pagato, nel backup, valore errato rifiutato', async () => {
+  const { buildBackup, parseBackupText } = await import('../js/backup.js');
+  const { validateRecord } = await import('../js/store.js');
+  const { store, a } = setup();
+  store.setPaid([{ month: '2026-01', studioId: a, paid: true, bollo: true }, { month: '2026-02', studioId: a, paid: false, bollo: true }]);
+  const byMonth = Object.fromEntries(store.getPayments().map((p) => [p.month, p]));
+  assert.equal(byMonth['2026-01'].bollo, true);
+  assert.equal(byMonth['2026-02'].bollo, false, 'non pagato: niente bollo');
+  store.setPaid([{ month: '2026-01', studioId: a, paid: false, bollo: true }]);
+  assert.equal(store.getPayments().find((p) => p.month === '2026-01').bollo, false, 'tornato da incassare: bollo tolto');
+  store.setPaid([{ month: '2026-01', studioId: a, paid: true, bollo: true }]);
+  const parsed = parseBackupText(JSON.stringify(buildBackup(store.exportData())));
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.equal(parsed.data.payments.find((p) => p.month === '2026-01').bollo, true);
+  const rec = { ...store.getPayments()[0], bollo: 'si' };
+  assert.equal(validateRecord('payment', rec), 'Marca da bollo non valida');
+  const old = { ...store.getPayments()[0] };
+  delete old.bollo;
+  assert.equal(validateRecord('payment', old), null, 'i record della versione precedente restano validi');
+});
+
+test('impostazioni dell\'account: parametri delle tasse salvati, ricaricati, nel backup e sincronizzabili', async () => {
+  const { buildBackup, parseBackupText } = await import('../js/backup.js');
+  const { store, storage } = setup();
+  assert.equal(store.getSetting('tax'), null);
+  store.setSetting('tax', { coeff: 7800, inps: 2400, rate: 500, bollo: 200 });
+  assert.deepEqual(makeStore(storage).getSetting('tax'), { coeff: 7800, inps: 2400, rate: 500, bollo: 200 });
+  assert.throws(() => store.setSetting('colore', {}), ValidationError);
+  assert.throws(() => store.setSetting('tax', 5), ValidationError);
+  const parsed = parseBackupText(JSON.stringify(buildBackup(store.exportData())));
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.deepEqual(parsed.data.settings.map((x) => [x.id, x.value.inps]), [['tax', 2400]]);
+  // dopo un'importazione il valore del backup sostituisce quello attuale
+  store.setSetting('tax', { coeff: 7800, inps: 2607, rate: 1500, bollo: 200 });
+  store.replaceAll(parsed.data);
+  assert.equal(store.getSetting('tax').inps, 2400);
+  // record sincronizzabile come gli altri (chiave setting_tax)
+  store.setTracking?.(true);
+  const recs = store.getRecordsByKeys(['setting_tax']);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].kind, 'setting');
+});

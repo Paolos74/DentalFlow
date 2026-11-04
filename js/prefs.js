@@ -1,16 +1,19 @@
 // Preferenze del dispositivo in 'dentalflow:prefs' (non entrano nel backup né nella sincronizzazione).
-// {theme:'light'|'dark'|'auto', csvFormat:'virgola'|'excel', lastBackupAt:ms|null}
+// {theme:'light'|'dark'|'auto', csvFormat:'virgola'|'excel', lastBackupAt:ms|null, tax:{coeff,inps,rate,bollo}|null}
+import { normalizeTaxParams } from './tax.js';
 
 export const PREFS_KEY = 'dentalflow:prefs';
 export const BEFORE_IMPORT_KEY = 'dentalflow:before-import';
 export const BACKUP_REMINDER_DAYS = 14;
 const DAY_MS = 86400000;
 
-const DEFAULTS = { theme: 'light', csvFormat: 'virgola', lastBackupAt: null };
+const DEFAULTS = { theme: 'light', csvFormat: 'virgola', lastBackupAt: null, tax: null };
 const VALID = {
   theme: (v) => ['light', 'dark', 'auto'].includes(v),
   csvFormat: (v) => ['virgola', 'excel'].includes(v),
   lastBackupAt: (v) => v === null || (Number.isSafeInteger(v) && v >= 0),
+  // parametri delle tasse salvati sul dispositivo dalla v11 (ora stanno nell'account: store 'setting' 'tax')
+  tax: (v) => v === null || (typeof v === 'object' && !Array.isArray(v)),
 };
 
 export function readPrefs(storage) {
@@ -24,6 +27,7 @@ export function readPrefs(storage) {
   if (o && typeof o === 'object' && !Array.isArray(o)) {
     for (const k of Object.keys(DEFAULTS)) if (k in o && VALID[k](o[k])) out[k] = o[k];
   }
+  if (out.tax) out.tax = normalizeTaxParams(out.tax);
   return out;
 }
 

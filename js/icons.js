@@ -35,6 +35,7 @@ const PATHS = {
   euro: `<path ${S} d="M17.5 6.5A6.5 6.5 0 1 0 17.5 17.5M4.5 10.5h9M4.5 13.5h9"/>`,
   flag: `<path ${S} d="M5 21V4.5M5 4.5h11l-2 4 2 4H5"/>`,
   repeat: `<path ${S} d="M17 3.5l3 3-3 3M4 11.5v-1a4 4 0 0 1 4-4h12M7 20.5l-3-3 3-3M20 12.5v1a4 4 0 0 1-4 4H4"/>`,
+  xmark: `<path ${S} d="M7 7l10 10M17 7 7 17"/>`,
   trash: `<path ${S} d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13a1.5 1.5 0 0 0 1.5 1.5h6a1.5 1.5 0 0 0 1.5-1.5l1-13"/>`,
   wallet: `<rect ${S} x="3.5" y="6" width="17" height="13" rx="3"/><path ${S} d="M3.5 10h17M15.5 14.5h1.5"/>`,
   search: `<circle ${S} cx="11" cy="11" r="6.5"/><path ${S} d="M16 16l4.5 4.5"/>`,

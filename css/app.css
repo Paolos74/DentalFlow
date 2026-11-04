@@ -849,6 +849,26 @@ body:has(#update-banner:not([hidden])) .toast-host { bottom: calc(var(--tab-h) +
 .treat-line { display: grid; padding: 8px 0; }
 .treat-line.is-extra { border-top: .5px dashed var(--separator); }
 .treat-main { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.treat-controls { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+/* ✕ di una riga: cerchio grigio, bersaglio di 44 pt */
+.treat-remove {
+  width: 44px; height: 44px; margin-right: -8px; display: inline-grid; place-items: center; flex: none;
+  border: 0; border-radius: 50%; background: transparent; color: var(--text-3, var(--text-2)); cursor: pointer;
+}
+.treat-remove .icon-wrap { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--surface-2); }
+.treat-remove .icon { width: 16px; height: 16px; }
+.treat-remove:hover .icon-wrap, .treat-remove:focus-visible .icon-wrap { color: var(--danger); }
+.treat-remove:active .icon-wrap { transform: scale(.92); }
+.treat-empty { padding: 4px 0 12px; }
+.treat-empty-title { font-weight: 600; font-size: 1.0625rem; margin: 0 0 2px; }
+/* foglio di scelta con ricerca */
+.pick-search {
+  width: 100%; min-height: 40px; margin: 4px 0 12px; padding: 8px 12px; border: 0; border-radius: 10px;
+  background: var(--surface-2); color: var(--text); font-size: 1.0625rem;
+}
+.pick-list .row { width: 100%; }
+.pick-plus { color: var(--accent); }
+.pick-empty { margin: 8px 4px 16px; }
 .treat-name { font-weight: 600; font-size: 1.0625rem; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .treat-name > span:first-child { min-width: 0; }
 .treat-name.is-extra { font-weight: 500; font-size: .9375rem; color: var(--text-2); }
@@ -1381,3 +1401,24 @@ textarea.auto-grow { resize: none; overflow: hidden; min-height: 76px; }
 
 /* Incassi: "Ottobre 2026" a sinistra, importo grigio a destra come gli altri fogli */
 .check-value { font-variant-numeric: tabular-nums; }
+
+/* ---------- Recap → Tasse ---------- */
+.tax-year { font-weight: 700; font-size: 1.125rem; min-width: 7.5rem; text-align: center; }
+.tax-lines { margin: 4px 0 0; }
+.tax-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 0; }
+.tax-line + .tax-line { border-top: .5px solid var(--separator); }
+.tax-label { display: grid; gap: 2px; min-width: 0; }
+.tax-value { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.tax-line.is-total .tax-label > span:first-child, .tax-line.is-total .tax-value { font-weight: 700; }
+#tax-netto .tax-value { color: var(--accent); font-size: 1.125rem; }
+#tax-due .group-title { margin: 14px 0 0; }
+.tax-warning {
+  display: flex; gap: 10px; align-items: flex-start; margin: 0 0 16px; padding: 12px 14px; border-radius: 14px;
+  background: var(--danger-tint); color: var(--danger); font-weight: 600; font-size: .9375rem;
+}
+.tax-warning .icon { width: 20px; height: 20px; flex: none; }
+.tax-disclaimer { margin: 4px 4px 24px; }
+#tax-params { margin-bottom: 16px; }
+/* Incassi: spunta della marca da bollo sotto il mese pagato */
+.check.check-bollo { padding-left: 44px; min-height: 40px; }
+.check.check-bollo .check-sub { color: var(--text-2); font-size: .875rem; }

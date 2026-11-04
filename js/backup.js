@@ -1,6 +1,6 @@
 // Backup completo in JSON: creazione, validazione, lettura (funzioni pure).
 // Formato invariato (schemaVersion 1). Sezioni facoltative aggiunte dopo la prima versione:
-// calendar: {rules, days}, notes, payments. I backup senza queste sezioni restano validi;
+// calendar: {rules, days}, notes, payments, settings (impostazioni dell'account, es. parametri delle tasse). I backup senza queste sezioni restano validi;
 // una versione vecchia dell'app le ignora.
 import { validateRecord } from './store.js';
 
@@ -15,6 +15,7 @@ const OPTIONAL_INFO = [
   ['days', 'day', 'un giorno del calendario', 'giorni del calendario'],
   ['notes', 'note', 'una nota', 'note'],
   ['payments', 'payment', 'un incasso', 'incassi'],
+  ['settings', 'setting', 'un\'impostazione', 'impostazioni'],
 ];
 
 export function buildBackup(data, exportedAt = new Date().toISOString()) {
@@ -30,6 +31,7 @@ export function buildBackup(data, exportedAt = new Date().toISOString()) {
   if (data.calendar) out.calendar = { rules: strip(data.calendar.rules), days: strip(data.calendar.days) };
   if (data.notes) out.notes = strip(data.notes);
   if (data.payments) out.payments = strip(data.payments);
+  if (data.settings) out.settings = strip(data.settings);
   return out;
 }
 
@@ -70,10 +72,11 @@ export function validateBackup(obj) {
   }
   if (obj.calendar !== undefined && !isObj(obj.calendar)) return fail('Backup non valido: calendario non riconosciuto');
   const sources = {
-    rules: obj.calendar?.rules, days: obj.calendar?.days, notes: obj.notes, payments: obj.payments,
+    rules: obj.calendar?.rules, days: obj.calendar?.days, notes: obj.notes, payments: obj.payments, settings: obj.settings,
   };
   const present = {
     rules: obj.calendar !== undefined, days: obj.calendar !== undefined, notes: obj.notes !== undefined, payments: obj.payments !== undefined,
+    settings: obj.settings !== undefined,
   };
   for (const [arr, kind, label, plural] of OPTIONAL_INFO) {
     if (!present[arr]) continue;

@@ -182,6 +182,61 @@ export function choiceDialog({ title, message, details = [], choices }) {
 }
 
 /**
+ * Foglio di scelta con ricerca: "Annulla · titolo", campo Cerca, elenco di righe da toccare.
+ * options: [{value, label, sub?}]; footer: {label, value} riga in fondo (es. "Altri…").
+ * Risolve con il value toccato, o null se annullato.
+ */
+export function pickDialog({ title, subtitle, options, searchPlaceholder = 'Cerca', emptyText = 'Nessun risultato', footer, idPrefix = 'pick' }) {
+  return new Promise((resolve) => {
+    openDialog((dlg, close) => {
+      const done = (v) => { close(); resolve(v); };
+      const tid = titleId();
+      dlg.setAttribute('aria-labelledby', tid);
+      const search = el('input', {
+        type: 'search', id: `${idPrefix}-search`, class: 'pick-search', placeholder: searchPlaceholder,
+        autocomplete: 'off', spellcheck: 'false', 'aria-label': searchPlaceholder, enterkeyhint: 'search',
+      });
+      const list = el('ul', { class: 'list grouped pick-list', id: `${idPrefix}-list` });
+      const empty = el('p', { class: 'muted pick-empty', id: `${idPrefix}-empty`, hidden: true, text: emptyText });
+      const norm = (s) => String(s).toLocaleLowerCase('it').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const paint = () => {
+        clear(list);
+        const q = norm(search.value.trim());
+        const shown = options.filter((o) => !q || norm(o.label).includes(q));
+        for (const o of shown) {
+          list.append(el('li', {}, el('button', {
+            type: 'button', class: 'row', dataset: { value: o.value }, onclick: () => done(o.value),
+          }, el('span', { class: 'row-main' }, el('span', { class: 'row-title', text: o.label }),
+            o.sub ? el('span', { class: 'row-sub', text: o.sub }) : null), icon('plus-circle', 'pick-plus'))));
+        }
+        list.hidden = shown.length === 0;
+        empty.hidden = shown.length > 0;
+      };
+      search.addEventListener('input', paint);
+      // Invio nella ricerca con un solo risultato: lo sceglie
+      search.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const first = list.querySelectorAll('button.row');
+        if (first.length === 1) first[0].click();
+      });
+      dlg.append(el('div', { class: 'sheet-form' },
+        el('div', { class: 'sheet-grabber', 'aria-hidden': 'true' }),
+        el('header', { class: 'sheet-bar' },
+          el('button', { type: 'button', class: 'sheet-btn', text: 'Annulla', onclick: () => done(null) }),
+          sheetTitle(tid, title, subtitle),
+          el('span', { class: 'sheet-btn', 'aria-hidden': 'true' })),
+        el('div', { class: 'sheet-body' },
+          options.length > 6 ? search : null, list, empty,
+          footer ? el('div', { class: 'sheet-extra' }, el('button', {
+            type: 'button', class: 'btn btn-block btn-secondary', id: `${idPrefix}-footer`, onclick: () => done(footer.value),
+          }, icon('plus'), footer.label)) : null)));
+      paint();
+    }, { onCancel: () => resolve(null), dismissable: true });
+  });
+}
+
+/**
  * Foglio con modulo. Barra in alto "Annulla · titolo · Salva" come i fogli di iOS.
  * build(body, close) aggiunge i campi; onSubmit() ritorna true per chiudere,
  * false per restare aperto (errori mostrati inline). Risolve true se salvato.
