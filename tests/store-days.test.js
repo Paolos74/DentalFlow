@@ -318,3 +318,26 @@ test('incassi: parte del mese esclusa dalle tasse, modificabile, conservata se n
   assert.equal(parsed.data.payments.find((p) => p.month === '2026-10').excludedCents, 3000);
   assert.notEqual(validateRecord('payment', { ...get(), excludedCents: -1 }), null);
 });
+
+test('note da ricordare: aggiungi, modifica, ordine per ultima modifica, elimina con annulla, backup e ricaricamento', async () => {
+  const { buildBackup, parseBackupText } = await import('../js/backup.js');
+  let t = 1000;
+  const storage = memStorage();
+  const store = makeStore(storage, { now: () => (t += 10) });
+  const a = store.addMemo('  Ordinare guanti\nmisura S  ');
+  const b = store.addMemo('Corso aggiornamento');
+  assert.deepEqual(store.getMemos().map((m) => m.text), ['Corso aggiornamento', 'Ordinare guanti\nmisura S']);
+  store.updateMemo(a, 'Ordinare guanti e mascherine');
+  assert.equal(store.getMemos()[0].id, a, 'la nota modificata va in cima');
+  assert.throws(() => store.addMemo('   '), ValidationError);
+  assert.throws(() => store.updateMemo('x', 'testo'), ValidationError);
+  assert.equal(makeStore(storage).getMemos().length, 2);
+  const parsed = parseBackupText(JSON.stringify(buildBackup(store.exportData())));
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.equal(parsed.data.memos.length, 2);
+  const removed = store.deleteMemo(b);
+  assert.equal(store.getMemos().length, 1);
+  assert.equal(store.restoreRecords(removed), 1);
+  assert.equal(store.getMemos().length, 2);
+  assert.equal(store.getRecordsByKeys([`memo_${a}`])[0].kind, 'memo');
+});

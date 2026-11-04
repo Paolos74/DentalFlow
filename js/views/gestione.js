@@ -5,6 +5,7 @@ import {
   el, clear, toast, showError, confirmDialog, choiceDialog, textDialog, checkboxDialog, field,
   downloadBlob, canShareFile, shareFile, getSwVersion, listRow, studioDot,
   pageHeader, sectionHead, iconTile, icon, emptyState, iconButton, navButton, groupNote, groupRow, formGroup, archivedBadge,
+  formDialog, undoToast, autoGrow,
 } from '../ui.js';
 import { todayISO, formatDateShort, formatDayTitle, formatLong, addDays } from '../dates.js';
 import { buildBackup, parseBackupText, validateBackup } from '../backup.js';
@@ -47,6 +48,8 @@ const PAGES = {
       b.disabled = ctx.store.getStudios().length === 0;
       return [b];
     }],
+  note: ['Note', (ctx) => memoSection(ctx),
+    (ctx) => [iconButton({ name: 'plus', label: 'Nuova nota', id: 'memo-new', onClick: () => memoDialog(ctx, null) })]],
   backup: ['Backup e ripristino', (ctx) => backupSection(ctx)],
   sync: ['Sincronizzazione', (ctx) => syncSection(ctx)],
   aspetto: ['Aspetto', (ctx) => aspettoSection(ctx)],
@@ -79,7 +82,8 @@ export function render(container, ctx) {
     el('ul', { class: 'list grouped', id: 'altro-menu' },
       listRow({ href: '#calendario', id: 'altro-calendario', lead: lead('calendar', 'red'), title: 'Calendario di lavoro', subtitle: nCal ? `${nCal} ${nCal === 1 ? 'regola o giorno' : 'regole e giorni'}` : 'Imposta i giorni in cui lavori' }),
       listRow({ href: '#altro/studi', id: 'altro-studi', lead: lead('studio', 'blue'), title: 'Studi', value: String(store.getStudios({ includeArchived: true }).length) }),
-      listRow({ href: '#altro/trattamenti', id: 'altro-trattamenti', lead: lead('tooth', 'mint'), title: 'Trattamenti', value: String(store.getTreatments().length) })),
+      listRow({ href: '#altro/trattamenti', id: 'altro-trattamenti', lead: lead('tooth', 'mint'), title: 'Trattamenti', value: String(store.getTreatments().length) }),
+      listRow({ href: '#altro/note', id: 'altro-note', lead: lead('note', 'teal'), title: 'Note', subtitle: 'Cose da ricordare', value: store.getMemos().length ? String(store.getMemos().length) : null })),
     sectionHead('Dati'),
     el('ul', { class: 'list grouped' },
       listRow({ href: '#altro/backup', id: 'altro-backup', lead: lead('backup', 'orange'), title: 'Backup e ripristino', subtitle: last ? `Ultimo backup: ${formatDateShort(todayISO(last))}` : 'Nessun backup esportato' }),
@@ -89,6 +93,70 @@ export function render(container, ctx) {
       listRow({ href: '#altro/aspetto', id: 'altro-aspetto', lead: lead('appearance', 'purple'), title: 'Aspetto', value: THEMES.find(([v]) => v === ctx.prefs.get().theme)?.[1] }),
       listRow({ href: '#altro/installa', id: 'altro-installa', lead: lead('install', 'indigo'), title: 'Installa app', value: install.isInstalled() ? 'Installata' : null }),
       listRow({ href: '#altro/info', id: 'altro-info', lead: lead('info', 'gray'), title: 'Info' })));
+}
+
+// ---------- note da ricordare ----------
+function memoSection(ctx) {
+  const memos = ctx.store.getMemos();
+  const wrap = el('div', { id: 'memo-page' });
+  if (memos.length === 0) {
+    wrap.append(el('div', { class: 'card' }, emptyState({
+      iconName: 'note', color: 'teal', title: 'Nessuna nota', id: 'memo-empty',
+      text: 'Scrivi qui le cose da ricordare: materiali da ordinare, appuntamenti, promemoria.',
+      action: el('button', { type: 'button', class: 'btn btn-primary', id: 'memo-new-empty', text: 'Nuova nota', onclick: () => memoDialog(ctx, null) }),
+    })));
+    return wrap;
+  }
+  const ul = el('ul', { class: 'list grouped', id: 'memo-list' });
+  for (const m of memos) {
+    const [first, ...rest] = m.text.split('\n');
+    const body = rest.join(' ').trim();
+    ul.append(el('li', {}, el('button', {
+      type: 'button', class: 'row memo-row', dataset: { memo: m.id }, 'aria-label': `Modifica la nota: ${first}`,
+      onclick: () => memoDialog(ctx, m),
+    }, el('span', { class: 'row-main' },
+      el('span', { class: 'row-title memo-title', text: first }),
+      body ? el('span', { class: 'row-sub memo-preview', text: body }) : null,
+      el('span', { class: 'row-sub memo-date', text: formatDateShort(todayISO(m.updatedAt)) })), icon('chevron'))));
+  }
+  wrap.append(ul, el('button', {
+    type: 'button', class: 'btn btn-secondary btn-block memo-add', id: 'memo-new-bottom', onclick: () => memoDialog(ctx, null),
+  }, icon('plus'), 'Nuova nota'));
+  return wrap;
+}
+
+/** Foglio della nota: un solo campo di testo (la prima riga fa da titolo nell'elenco). */
+function memoDialog(ctx, memo) {
+  const { store } = ctx;
+  const area = el('textarea', { id: 'memo-text', rows: '8', maxlength: '4000', placeholder: 'Scrivi qui…', 'aria-label': 'Testo della nota' });
+  area.value = memo?.text || '';
+  formDialog({
+    title: memo ? 'Nota' : 'Nuova nota',
+    submitText: memo ? 'Salva' : 'Aggiungi',
+    build: (form) => {
+      form.append(el('div', { class: 'form-group memo-box' }, area),
+        groupNote('La prima riga è il titolo nell\'elenco.'));
+      autoGrow(area);
+      setTimeout(() => area.focus(), 50);
+    },
+    extraAction: memo ? {
+      label: 'Elimina nota', kind: 'danger',
+      onClick: () => {
+        try {
+          undoToast(store, 'Nota eliminata', store.deleteMemo(memo.id));
+        } catch (err) {
+          showError(err);
+        }
+      },
+    } : undefined,
+    onSubmit: ({ setFormError }) => {
+      if (!area.value.trim()) { setFormError('Scrivi qualcosa nella nota'); return false; }
+      if (memo) store.updateMemo(memo.id, area.value);
+      else store.addMemo(area.value);
+      toast(memo ? 'Nota salvata' : 'Nota aggiunta');
+      return true;
+    },
+  });
 }
 
 // ---------- aspetto ----------
