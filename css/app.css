@@ -1428,3 +1428,10 @@ textarea.auto-grow { resize: none; overflow: hidden; min-height: 76px; }
 /* Incassi: spunta della marca da bollo sotto il mese pagato */
 .check.check-bollo { padding-left: 44px; min-height: 40px; }
 .check.check-bollo .check-sub { color: var(--text-2); font-size: .875rem; }
+/* VN01 */
+#res-page .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+#res-page .kpi:first-child { grid-column: auto; padding: 12px; }
+#res-page .kpi-value, #res-page .kpi:first-child .kpi-value { font-family: inherit; font-weight: 700; font-size: 1.125rem; white-space: nowrap; overflow-wrap: normal; }
+#res-add { margin: 0 0 16px; }
+.res-empty { margin: 0 4px 16px; }
+.res-actions { margin: 12px 0 24px; }

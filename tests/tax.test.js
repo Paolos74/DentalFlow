@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  forfettario, acconti, scadenze, yearCompensi, yearBolli, normalizeTaxParams, TAX_DEFAULTS, rateForYear, lastStartupYear,
+  forfettario, acconti, scadenze, yearCompensi, yearBolli, yearExcluded, normalizeTaxParams, TAX_DEFAULTS, rateForYear, lastStartupYear,
 } from '../js/tax.js';
 
 test('forfettario 2026: 30.000 € di compensi e 12 marche da bollo', () => {
@@ -88,8 +88,8 @@ test('compensi e marche da bollo dell\'anno', () => {
 });
 
 test('parametri: valori fuori limite tornano ai predefiniti', () => {
-  assert.deepEqual(normalizeTaxParams({ coeff: 7800, inps: 99999, rate: 500, bollo: -1, openDate: '2026-13-01' }), { coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null });
-  assert.deepEqual(normalizeTaxParams(null), TAX_DEFAULTS);
+  assert.deepEqual(normalizeTaxParams({ coeff: 7800, inps: 99999, rate: 500, bollo: -1, openDate: '2026-13-01' }), { coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null, excluded: [] });
+  assert.deepEqual(normalizeTaxParams(null), { ...TAX_DEFAULTS, excluded: [] });
 });
 
 test('apertura della partita IVA: 5 % nell\'anno di apertura e nei 4 successivi, poi 15 %', () => {
@@ -106,4 +106,19 @@ test('apertura della partita IVA: 5 % nell\'anno di apertura e nei 4 successivi,
   const after = forfettario({ compensiCents: 1000000, params: p, year: 2029 });
   assert.equal(after.rate, 1500);
   assert.equal(after.imposta, 86498); // 15 % di 576.654
+});
+
+test('trattamenti esclusi dal calcolo: fuori dai compensi, elencati a parte, parametro normalizzato', () => {
+  const entries = [
+    { date: '2026-03-01', treatmentId: 'a', amountCents: 10000 },
+    { date: '2026-03-02', treatmentId: 'b', amountCents: 2500 },
+    { date: '2026-04-02', treatmentId: 'b', amountCents: 500 },
+    { date: '2025-04-02', treatmentId: 'b', amountCents: 999 },
+  ];
+  assert.equal(yearCompensi(entries, 2026), 13000);
+  assert.equal(yearCompensi(entries, 2026, ['b']), 10000);
+  assert.deepEqual([...yearExcluded(entries, 2026, ['b'])], [['b', 3000]]);
+  assert.deepEqual(yearExcluded(entries, 2026, []).size, 0);
+  assert.deepEqual(normalizeTaxParams({ excluded: ['b', 'a', 'b', '', 3] }).excluded, ['a', 'b']);
+  assert.deepEqual(normalizeTaxParams({ excluded: 'x' }).excluded, []);
 });

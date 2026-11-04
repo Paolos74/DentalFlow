@@ -54,7 +54,7 @@ I dati sono sempre salvati sul dispositivo, quindi puoi inserire anche senza con
 
 ## Aggiornamenti
 
-Quando pubblichi una nuova versione, cambia la riga `const VERSION = 'dentalflow-v15';` in `sw.js` (es. `dentalflow-v16`). Al prossimo avvio l'app mostra l'avviso **"Nuova versione"** sopra la barra delle schede. Il pulsante **Aggiorna** carica la nuova versione. L'app non si ricarica mai da sola, così non perdi un inserimento a metà.
+Quando pubblichi una nuova versione, cambia la riga `const VERSION = 'dentalflow-v17';` in `sw.js` (es. `dentalflow-v18`). Al prossimo avvio l'app mostra l'avviso **"Nuova versione"** sopra la barra delle schede. Il pulsante **Aggiorna** carica la nuova versione. L'app non si ricarica mai da sola, così non perdi un inserimento a metà.
 
 ## Backup
 

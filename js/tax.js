@@ -12,7 +12,8 @@
 // tra 51,65 € e 257,52 €; nessuno sotto 51,65 €), contributi 80 % (40 % + 40 %).
 
 // imposta predefinita 5 % (scelta dell'utente: primi 5 anni di attività)
-export const TAX_DEFAULTS = Object.freeze({ coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null });
+// excluded: id dei trattamenti esclusi dal calcolo (es. compensi non da partita IVA); sempre visibili in Tasse
+export const TAX_DEFAULTS = Object.freeze({ coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null, excluded: Object.freeze([]) });
 export const RATE_STARTUP = 500;
 export const RATE_STANDARD = 1500;
 export const STARTUP_YEARS = 5;
@@ -30,8 +31,9 @@ const pct = (cents, bp) => Math.round((cents * bp) / 10000);
 
 /** Parametri validi (interi nei limiti), con i valori predefiniti al posto di quelli mancanti o errati. */
 export function normalizeTaxParams(p) {
-  const out = { ...TAX_DEFAULTS };
+  const out = { ...TAX_DEFAULTS, excluded: [] };
   if (p && typeof p === 'object') {
+    if (Array.isArray(p.excluded)) out.excluded = [...new Set(p.excluded.filter((x) => typeof x === 'string' && x !== ''))].sort().slice(0, 500);
     for (const [k, [min, max]] of Object.entries(TAX_LIMITS)) {
       const v = p[k];
       if (Number.isInteger(v) && v >= min && v <= max) out[k] = v;
@@ -55,12 +57,25 @@ export function rateForYear(params, year) {
   return Number(year) <= last ? RATE_STARTUP : RATE_STANDARD;
 }
 
-/** Compensi dell'anno: somma degli inserimenti con data nell'anno (YYYY). */
-export function yearCompensi(entries, year) {
+/** Compensi dell'anno: somma degli inserimenti con data nell'anno (YYYY), senza i trattamenti esclusi. */
+export function yearCompensi(entries, year, excluded = []) {
   const y = String(year);
+  const skip = new Set(excluded);
   let cents = 0;
-  for (const e of entries || []) if (!e.deleted && e.date.slice(0, 4) === y) cents += e.amountCents;
+  for (const e of entries || []) if (!e.deleted && e.date.slice(0, 4) === y && !skip.has(e.treatmentId)) cents += e.amountCents;
   return cents;
+}
+
+/** Compensi esclusi dell'anno per trattamento: Map treatmentId → centesimi (solo quelli > 0). */
+export function yearExcluded(entries, year, excluded = []) {
+  const y = String(year);
+  const skip = new Set(excluded);
+  const out = new Map();
+  for (const e of entries || []) {
+    if (e.deleted || e.date.slice(0, 4) !== y || !skip.has(e.treatmentId)) continue;
+    out.set(e.treatmentId, (out.get(e.treatmentId) || 0) + e.amountCents);
+  }
+  return out;
 }
 
 /** Marche da bollo addebitate nell'anno: mesi pagati con la spunta "bollo". */

@@ -38,9 +38,9 @@ test('copia di sicurezza prima dell\'importazione', () => {
 test('parametri delle tasse nelle preferenze: salvati, valori errati corretti', () => {
   const st = memStorage();
   writePrefs(st, { tax: { coeff: 7800, inps: 2400, rate: 500, bollo: 200 } });
-  assert.deepEqual(readPrefs(st).tax, { coeff: 7800, inps: 2400, rate: 500, bollo: 200, openDate: null });
+  assert.deepEqual(readPrefs(st).tax, { coeff: 7800, inps: 2400, rate: 500, bollo: 200, openDate: null, excluded: [] });
   st.setItem(PREFS_KEY, JSON.stringify({ tax: { coeff: 'x', inps: 2400 } }));
-  assert.deepEqual(readPrefs(st).tax, { coeff: 7800, inps: 2400, rate: 500, bollo: 200, openDate: null });
+  assert.deepEqual(readPrefs(st).tax, { coeff: 7800, inps: 2400, rate: 500, bollo: 200, openDate: null, excluded: [] });
   st.setItem(PREFS_KEY, JSON.stringify({ tax: [1] }));
   assert.equal(readPrefs(st).tax, null);
 });

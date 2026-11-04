@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Genera le icone PNG di DentalFlow usando solo la libreria standard (zlib + struct).
 
-Disegno: sfondo blu a gradiente (#1565C0 -> #1E88E5) con un dente bianco stilizzato.
+Disegno: sfondo a gradiente diagonale (azzurro #2F8CFF in alto a sinistra -> blu indaco #3D4FE0 in basso
+a destra) con un dente bianco morbido: corona a due lobi e radici affusolate fuse con un "minimo morbido"
+(niente spigoli né scalini), più un'ombra leggera sotto il dente.
 Antialias: supersampling 4x (4x4 campioni) sui pixel vicini ai bordi, poi media (box filter).
 
 Uso:  python3 tools/make_icons.py   (scrive in icons/)
@@ -15,16 +17,13 @@ import zlib
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'icons')
 SS = 4  # supersampling per asse
 
-TOP = (0x15, 0x65, 0xC0)
-BOTTOM = (0x1E, 0x88, 0xE5)
+TOP_LEFT = (0x2F, 0x8C, 0xFF)
+BOTTOM_RIGHT = (0x3D, 0x4F, 0xE0)
 WHITE = (255, 255, 255)
+SHADOW = (0x12, 0x2A, 0x8C)
 
 
-# ---------- signed distance functions (unità del glifo: il dente sta nel cerchio di raggio 1) ----------
-
-def sd_circle(x, y, cx, cy, r):
-    return math.hypot(x - cx, y - cy) - r
-
+# ---------- funzioni di distanza (unità del glifo: il dente sta nel cerchio di raggio ~1) ----------
 
 def sd_round_box(x, y, cx, cy, hw, hh, r):
     qx = abs(x - cx) - hw + r
@@ -34,35 +33,57 @@ def sd_round_box(x, y, cx, cy, hw, hh, r):
     return math.hypot(ox, oy) + min(max(qx, qy), 0.0) - r
 
 
-def tapered(ax, ay, ar, bx, by, br, n=24):
-    """Radice affusolata: unione di cerchi lungo il segmento con raggio interpolato."""
-    return [(ax + (bx - ax) * i / (n - 1), ay + (by - ay) * i / (n - 1), ar + (br - ar) * i / (n - 1))
-            for i in range(n)]
+def sd_round_cone(px, py, ax, ay, bx, by, r1, r2):
+    """Segmento con raggio che va da r1 (in a) a r2 (in b): radice affusolata con estremità tonde."""
+    bax, bay = bx - ax, by - ay
+    l2 = bax * bax + bay * bay
+    rr = r1 - r2
+    a2 = l2 - rr * rr
+    il2 = 1.0 / l2
+    pax, pay = px - ax, py - ay
+    y = pax * bax + pay * bay
+    z = y - l2
+    qx, qy = pax * l2 - bax * y, pay * l2 - bay * y
+    x2 = qx * qx + qy * qy
+    y2 = y * y * l2
+    z2 = z * z * l2
+    k = math.copysign(1.0, rr) * rr * rr * x2
+    if math.copysign(1.0, z) * a2 * z2 > k:
+        return math.sqrt(x2 + z2) * il2 - r2
+    if math.copysign(1.0, y) * a2 * y2 < k:
+        return math.sqrt(x2 + y2) * il2 - r1
+    return (math.sqrt(x2 * a2 * il2) + y * rr) * il2 - r1
 
 
-CIRCLES = [(-0.30, -0.36, 0.36), (0.30, -0.36, 0.36)]  # corona: due cerchi sovrapposti
-CIRCLES += tapered(-0.34, 0.02, 0.30, -0.24, 0.80, 0.11)  # radice sinistra
-CIRCLES += tapered(0.34, 0.02, 0.30, 0.24, 0.80, 0.11)  # radice destra
-BODY = (0.0, -0.18, 0.655, 0.22, 0.20)  # corpo arrotondato (cx, cy, hw, hh, r)
+def smin(a, b, k):
+    """Minimo morbido: unisce due forme con un raccordo di ampiezza k."""
+    h = max(k - abs(a - b), 0.0) / k
+    return min(a, b) - h * h * k * 0.25
 
 
 def sd_tooth(x, y):
-    d = sd_round_box(x, y, *BODY)
-    for cx, cy, r in CIRCLES:
-        dc = math.hypot(x - cx, y - cy) - r
-        if dc < d:
-            d = dc
+    lobe_l = math.hypot(x + 0.31, y + 0.33) - 0.37
+    lobe_r = math.hypot(x - 0.31, y + 0.33) - 0.37
+    d = smin(lobe_l, lobe_r, 0.10)  # la piccola valle tra i lobi resta, ma senza punta
+    d = smin(d, sd_round_box(x, y, 0.0, -0.13, 0.64, 0.21, 0.21), 0.22)
+    root_l = sd_round_cone(x, y, -0.37, 0.05, -0.23, 0.80, 0.27, 0.10)
+    root_r = sd_round_cone(x, y, 0.37, 0.05, 0.23, 0.80, 0.27, 0.10)
+    d = smin(d, root_l, 0.26)
+    d = smin(d, root_r, 0.26)
     return d
 
 
-# Estensione massima del glifo dal centro (in unità glifo), per il controllo della safe zone
 def glyph_extent():
+    """Distanza massima dal centro dei punti del dente (scansione fitta), per il controllo della safe zone."""
     ext = 0.0
-    for cx, cy, r in CIRCLES:
-        ext = max(ext, math.hypot(cx, cy) + r)
-    cx, cy, hw, hh, _ = BODY
-    ext = max(ext, math.hypot(abs(cx) + hw, abs(cy) + hh))
-    return ext
+    n = 600
+    for j in range(n):
+        y = -1.2 + 2.4 * j / (n - 1)
+        for i in range(n):
+            x = -1.2 + 2.4 * i / (n - 1)
+            if sd_tooth(x, y) < 0:
+                ext = max(ext, math.hypot(x, y))
+    return ext + 0.01
 
 
 # ---------- rendering ----------
@@ -78,7 +99,7 @@ def render(size, glyph_scale, rounded_bg):
     px = bytearray(size * size * 4)
     glyph_mask = [False] * (size * size)
     unit = 1.0 / glyph_scale  # 1 pixel in unità glifo
-    edge = 0.75 * unit  # mezza diagonale di un pixel, in unità glifo
+    edge = 1.5 * unit  # banda larga: il minimo morbido non è una distanza esatta
     sub = [(i + 0.5) / SS for i in range(SS)]
 
     def bg_sd(x, y):
@@ -87,10 +108,15 @@ def render(size, glyph_scale, rounded_bg):
         return sd_round_box(x, y, cx, cy, size / 2.0, size / 2.0, radius_bg)
 
     for j in range(size):
-        t = j / (size - 1)
-        bg_col = (lerp(TOP[0], BOTTOM[0], t), lerp(TOP[1], BOTTOM[1], t), lerp(TOP[2], BOTTOM[2], t))
         for i in range(size):
             pxc, pyc = i + 0.5, j + 0.5
+            t = min(1.0, max(0.0, (i + j) / (2.0 * (size - 1))))  # gradiente diagonale
+            bg_col = tuple(lerp(TOP_LEFT[c], BOTTOM_RIGHT[c], t) for c in range(3))
+            # ombra morbida sotto il dente (spostata in basso), sfumata con la distanza
+            ds = sd_tooth((pxc - cx) / glyph_scale, (pyc - cy) / glyph_scale - 0.07)
+            sh = 0.28 * min(1.0, max(0.0, 1.0 - (ds + 0.02) / 0.16))
+            if sh > 0:
+                bg_col = tuple(lerp(bg_col[c], SHADOW[c], sh) for c in range(3))
             # copertura sfondo
             dbg = bg_sd(pxc, pyc)
             if dbg < -0.75:

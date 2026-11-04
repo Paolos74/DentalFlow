@@ -3,7 +3,7 @@
 // I calcoli sono in tax.js; i parametri sono un'impostazione dell'account (store 'setting' id 'tax':
 // si sincronizzano ed entrano nel backup). I parametri salvati sul dispositivo dalla v11 valgono finché non si salva.
 import {
-  el, toast, formDialog, groupRow, formGroup, groupNote, sectionHead, iconTile, icon, iconButton, listRow,
+  el, toast, formDialog, groupRow, formGroup, groupNote, sectionHead, iconTile, icon, iconButton, listRow, checkRow,
 } from '../ui.js';
 import { formatEuro, formatPct, parseEuroInput, formatEuroCsv } from '../money.js';
 import { todayISO, formatLong } from '../dates.js';
@@ -16,9 +16,13 @@ import { isValidISODate, formatDateShort } from '../dates.js';
 const state = { year: Number(todayISO().slice(0, 4)) };
 const pctText = (bp) => `${formatEuroCsv(bp).replace(/,00$/, '')} %`; // 2607 → "26,07 %", 7800 → "78 %"
 
+export function yearEntries(store, year) {
+  return store.getEntries({ from: `${year}-01-01`, to: `${year}-12-31` });
+}
+
 function estimateFor(store, params, year) {
   return forfettario({
-    compensiCents: yearCompensi(store.getEntries({ from: `${year}-01-01`, to: `${year}-12-31` }), year),
+    compensiCents: yearCompensi(yearEntries(store, year), year, params.excluded),
     bolli: yearBolli(store.getPayments(), year),
     params,
     year,
@@ -26,7 +30,7 @@ function estimateFor(store, params, year) {
 }
 
 /** Riga "etichetta … importo" di un elenco raggruppato; strong = riga di totale. */
-function line(label, value, { sub, strong = false, id } = {}) {
+export function line(label, value, { sub, strong = false, id } = {}) {
   return el('li', { class: `tax-line${strong ? ' is-total' : ''}`, id },
     el('span', { class: 'tax-label' }, el('span', { text: label }), sub ? el('span', { class: 'row-sub', text: sub }) : null),
     el('span', { class: 'tax-value', text: value }));
@@ -132,7 +136,7 @@ export function renderInto(container, ctx) {
     + 'uguali a quelli dell\'anno; il massimale INPS e i casi di uscita dal regime non sono calcolati.' }));
 }
 
-const capitalizeFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+export const capitalizeFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
 /** "5 % fino al 2028, poi 15 %" con la data di apertura; null senza. */
 function rateNote(params, year) {
@@ -209,7 +213,9 @@ function paramsDialog(ctx, params) {
       const b = parseEuroInput(bollo.value);
       if (c === null || c < TAX_LIMITS.coeff[0] || c > TAX_LIMITS.coeff[1]) { fCoeff.setError('Coefficiente non valido (1–100 %)'); return false; }
       if (b === null || b > TAX_LIMITS.bollo[1]) { fBollo.setError('Importo non valido'); return false; }
-      const next = { coeff: c, inps: Number(inps.value), rate: Number(rate.value), bollo: b, openDate: open.value || null };
+      const next = { coeff: c, inps: Number(inps.value), rate: Number(rate.value), bollo: b, openDate: open.value || null,
+        excluded: params.excluded, // si scelgono in VN01
+      };
       ctx.store.setSetting('tax', next); // errori di salvataggio: messaggio nel foglio (formDialog)
       ctx.prefs.set({ tax: null }); // la copia sul dispositivo (v11) non serve più
       toast('Parametri aggiornati');
@@ -218,4 +224,3 @@ function paramsDialog(ctx, params) {
     },
   });
 }
-

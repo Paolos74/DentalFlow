@@ -13,6 +13,7 @@ import {
 } from '../calendar.js';
 import { ruleDialog } from './calendario.js';
 import { FIREBASE_CONFIG } from '../firebase-config.js';
+import * as vn01 from './vn01.js';
 import { STUDIO_COLORS, studioColorKey } from '../colors.js';
 import { readBeforeImport, writeBeforeImport, clearBeforeImport } from '../prefs.js';
 
@@ -52,6 +53,8 @@ const PAGES = {
   aspetto: ['Aspetto', (ctx) => aspettoSection(ctx)],
   installa: ['Installa app', (ctx) => installSection(ctx)],
   info: ['Info', () => infoSection()],
+  // non è nel menu: si apre da Info toccando 5 volte il logo
+  vn01: ['VN01', (ctx) => vn01.render(ctx)],
 };
 
 export function render(container, ctx) {
@@ -695,12 +698,23 @@ function installSection(ctx) {
   return card;
 }
 
+// 5 tocchi sul logo entro 2 secondi aprono VN01 (nessun indizio visibile)
+const TAPS = 5;
+const TAP_WINDOW_MS = 2000;
+let logoTaps = [];
+
 function infoSection() {
   const version = el('span', { id: 'ges-version', text: state.version || '…' });
   getSwVersion().then((v) => { state.version = v; version.textContent = v; });
+  const logo = el('img', { src: './icons/icon-192.png', alt: '', width: '72', height: '72', id: 'ges-logo', draggable: 'false' });
+  logo.addEventListener('click', () => {
+    const now = Date.now();
+    logoTaps = [...logoTaps.filter((t) => now - t < TAP_WINDOW_MS), now];
+    if (logoTaps.length >= TAPS) { logoTaps = []; location.hash = '#altro/vn01'; }
+  });
   return el('section', { class: 'card', id: 'ges-info' }, el('h3', { text: 'Info' }),
     el('div', { class: 'app-info' },
-      el('img', { src: './icons/icon-192.png', alt: '', width: '72', height: '72' }),
+      logo,
       el('h3', { text: 'DentalFlow' }),
       el('p', { class: 'muted' }, 'Versione app: ', version),
       el('p', { class: 'hint', text: 'Dati salvati sul dispositivo · funziona anche offline.' })));

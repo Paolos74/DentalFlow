@@ -297,3 +297,29 @@ test('impostazioni dell\'account: parametri delle tasse salvati, ricaricati, nel
   assert.equal(recs.length, 1);
   assert.equal(recs[0].kind, 'setting');
 });
+
+test('VN01: voci separate, mai negli inserimenti; modifica, eliminazione con annulla, backup e ricaricamento', async () => {
+  const { buildBackup, parseBackupText } = await import('../js/backup.js');
+  const { aggregate } = { aggregate: await import('../js/aggregate.js') };
+  const { store, storage, a } = setup();
+  const id = store.addVn({ date: '2026-03-10', studioId: a, treatment: ' Igiene dentale ', patients: 2, amountCents: 12000, note: 'mamma' });
+  assert.equal(store.getEntries().length, 0, 'non compare tra gli inserimenti');
+  assert.equal(aggregate.kpis(store.getEntries()).cents, 0, 'non entra nei totali del Recap');
+  const [v] = store.getVn({ from: '2026-01-01', to: '2026-12-31' });
+  assert.equal(v.treatment, 'Igiene dentale');
+  assert.equal(v.note, 'mamma');
+  store.updateVn(id, { amountCents: 15000 });
+  assert.equal(store.getVn()[0].amountCents, 15000);
+  assert.throws(() => store.addVn({ date: '2026-02-30', treatment: 'X', patients: 1, amountCents: 0 }), ValidationError);
+  assert.throws(() => store.addVn({ date: '2026-02-03', treatment: '', patients: 1, amountCents: 0 }), ValidationError);
+  assert.throws(() => store.addVn({ date: '2026-02-03', treatment: 'X', patients: 0, amountCents: 0 }), ValidationError);
+  assert.equal(makeStore(storage).getVn().length, 1, 'salvata su disco');
+  const parsed = parseBackupText(JSON.stringify(buildBackup(store.exportData())));
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.equal(parsed.data.vns.length, 1);
+  const removed = store.deleteVn(id);
+  assert.equal(store.getVn().length, 0);
+  assert.equal(store.restoreRecords(removed), 1);
+  assert.equal(store.getVn().length, 1);
+  assert.equal(store.getRecordsByKeys([`vn_${id}`])[0].kind, 'vn');
+});
