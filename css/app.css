@@ -610,6 +610,12 @@ body:has(#update-banner:not([hidden])) .toast-host { bottom: calc(var(--tab-h) +
   animation: sheet-up 300ms var(--ease-sheet);
 }
 .sheet-grabber { width: 36px; height: 5px; border-radius: 3px; background: var(--text-3); opacity: .5; margin: 6px auto 0; }
+/* la maniglia e la barra si trascinano verso il basso per chiudere il foglio */
+.dialog-sheet .sheet-grabber { position: relative; cursor: grab; }
+.dialog-sheet .sheet-grabber::after { content: ""; position: absolute; inset: -12px -80px; } /* bersaglio più grande */
+.dialog-sheet .sheet-bar { touch-action: none; }
+.dialog-sheet .sheet-bar .sheet-btn { touch-action: manipulation; }
+.dialog-sheet.is-dragging { user-select: none; cursor: grabbing; }
 .sheet-bar {
   position: sticky; top: 0; z-index: 1;
   display: grid; grid-template-columns: minmax(64px, auto) minmax(0, 1fr) minmax(64px, auto); align-items: center; gap: 4px;

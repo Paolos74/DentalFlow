@@ -1,5 +1,5 @@
 // Service worker di DentalFlow. Aumenta VERSION a ogni rilascio: comparirà il banner "Aggiorna".
-const VERSION = 'dentalflow-v14';
+const VERSION = 'dentalflow-v15';
 
 const ASSETS = [
   './',

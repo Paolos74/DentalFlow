@@ -111,15 +111,124 @@ function openDialog(build, { onCancel, kind = 'sheet', label, dismissable = fals
     close();
     onCancel?.();
   });
-  if (dismissable) {
+  const dismiss = () => { close(); onCancel?.(); };
+  if (kind === 'sheet') {
+    // fogli: si chiudono anche trascinando verso il basso o toccando lo sfondo, come in iOS;
+    // con modifiche non salvate prima si chiede conferma
+    let dirty = false;
+    const mark = (e) => { if (!e.target.closest?.('[data-nodirty]')) dirty = true; };
+    dlg.addEventListener('input', mark);
+    dlg.addEventListener('change', mark);
+    const guarded = async () => {
+      if (!dirty) return true;
+      return confirmDialog('Le modifiche non salvate andranno perse.', { title: 'Ignorare le modifiche?', okText: 'Ignora', cancelText: 'Continua', danger: true });
+    };
+    enableSheetSwipe(dlg, guarded, dismiss);
+    dlg.addEventListener('click', async (e) => {
+      if (e.target !== dlg || !isBackdropClick(dlg, e)) return;
+      if (await guarded()) dismiss();
+    });
+  } else if (dismissable) {
     // il clic sullo sfondo arriva al <dialog> stesso (il contenuto è dentro un figlio)
     dlg.addEventListener('click', (e) => {
-      if (e.target === dlg) { close(); onCancel?.(); }
+      if (e.target === dlg) dismiss();
     });
   }
   build(dlg, close);
   dlg.showModal();
   return dlg;
+}
+
+/** Il clic è fuori dal riquadro del foglio (sullo sfondo scuro)? */
+function isBackdropClick(dlg, e) {
+  const r = dlg.getBoundingClientRect();
+  return e.clientY < r.top || e.clientY > r.bottom || e.clientX < r.left || e.clientX > r.right;
+}
+
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Trascinamento verso il basso per chiudere un foglio. Parte dalla barra in alto (maniglia e titolo)
+ * oppure dal contenuto quando è già in cima. Si chiude oltre il 30 % dell'altezza (max 140 px) o con
+ * uno scatto veloce; altrimenti torna su. canClose() → Promise<boolean> (conferma se ci sono modifiche).
+ */
+function enableSheetSwipe(dlg, canClose, onClose) {
+  const INTERACTIVE = 'input, select, textarea, button, a, label, [contenteditable], [role="slider"]';
+  let start = null; // {x, y, t, header}
+  let dragging = false;
+  let dy = 0;
+  let last = { y: 0, t: 0 };
+  let velocity = 0; // px/ms verso il basso
+
+  const setY = (y, animate) => {
+    dlg.style.transition = animate && !reduceMotion() ? 'transform 220ms cubic-bezier(.2,.8,.2,1)' : 'none';
+    dlg.style.transform = y > 0 ? `translateY(${y}px)` : '';
+  };
+  const begin = (x, y, target) => {
+    if (target.closest(INTERACTIVE)) { start = null; return; }
+    start = { x, y, header: !!target.closest('.sheet-grabber, .sheet-bar') };
+    dragging = false;
+    dy = 0;
+    velocity = 0;
+    last = { y, t: performance.now() };
+  };
+  /** true se il gesto è un trascinamento del foglio (allora il chiamante blocca lo scorrimento). */
+  const move = (x, y) => {
+    if (!start) return false;
+    const ddy = y - start.y;
+    if (!dragging) {
+      const adx = Math.abs(x - start.x);
+      // verso l'alto o di lato: è uno scorrimento normale, non un trascinamento del foglio
+      if (ddy < -8 || (adx > 8 && adx > ddy)) { start = null; return false; }
+      if (ddy < 8) return false; // zona morta
+      if (!start.header && dlg.scrollTop > 0) { start = null; return false; }
+      dragging = true;
+      dlg.classList.add('is-dragging');
+    }
+    const now = performance.now();
+    if (now > last.t) velocity = (y - last.y) / (now - last.t);
+    last = { y, t: now };
+    dy = Math.max(0, ddy);
+    setY(dy, false);
+    return true;
+  };
+  const end = async () => {
+    const was = dragging;
+    start = null;
+    dragging = false;
+    dlg.classList.remove('is-dragging');
+    if (!was) return;
+    const h = dlg.offsetHeight || 1;
+    const far = dy > Math.min(140, h * 0.3) || velocity > 0.6;
+    if (!far) { setY(0, true); return; }
+    setY(0, true); // torna su mentre (se serve) si chiede conferma
+    if (!(await canClose())) return;
+    if (reduceMotion()) { onClose(); return; }
+    dlg.style.transition = 'transform 200ms ease-in';
+    dlg.style.transform = 'translateY(100%)';
+    setTimeout(onClose, 200);
+  };
+
+  dlg.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { start = null; return; }
+    begin(e.touches[0].clientX, e.touches[0].clientY, e.target);
+  }, { passive: true });
+  dlg.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) return;
+    if (move(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault();
+  }, { passive: false });
+  dlg.addEventListener('touchend', end);
+  dlg.addEventListener('touchcancel', end);
+  // mouse (computer): stesso gesto con il puntatore
+  dlg.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    begin(e.clientX, e.clientY, e.target);
+    if (!start) return;
+    const onMove = (ev) => { if (move(ev.clientX, ev.clientY)) ev.preventDefault(); };
+    const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); end(); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
 }
 
 let titleSeq = 0;
@@ -195,6 +304,7 @@ export function pickDialog({ title, subtitle, options, searchPlaceholder = 'Cerc
       const search = el('input', {
         type: 'search', id: `${idPrefix}-search`, class: 'pick-search', placeholder: searchPlaceholder,
         autocomplete: 'off', spellcheck: 'false', 'aria-label': searchPlaceholder, enterkeyhint: 'search',
+        'data-nodirty': '', // cercare non è una modifica: chiudere non chiede conferma
       });
       const list = el('ul', { class: 'list grouped pick-list', id: `${idPrefix}-list` });
       const empty = el('p', { class: 'muted pick-empty', id: `${idPrefix}-empty`, hidden: true, text: emptyText });
