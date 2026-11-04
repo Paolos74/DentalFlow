@@ -26,10 +26,9 @@ export const CAL_KEY = 'dentalflow:calendar';
 export const CAL_CORRUPT_PREFIX = 'dentalflow:calendar:corrupt-';
 export const MAX_CENTS = 10000000;
 export const MAX_NOTE = 1000;
-export const KINDS = ['studio', 'treatment', 'entry', 'rule', 'day', 'note', 'payment', 'setting', 'vn'];
-// vn: voci della pagina VN01, separate dagli inserimenti: nessuna schermata principale le legge
+export const KINDS = ['studio', 'treatment', 'entry', 'rule', 'day', 'note', 'payment', 'setting'];
 // setting: impostazioni dell'account {id, value} (es. id 'tax' = parametri delle tasse); si sincronizzano
-const CAL_ARRAYS = ['rules', 'days', 'notes', 'payments', 'settings', 'vns'];
+const CAL_ARRAYS = ['rules', 'days', 'notes', 'payments', 'settings'];
 export const SETTING_IDS = ['tax'];
 
 export const MSG = {
@@ -62,7 +61,7 @@ export const MSG = {
 };
 
 const ARRAY_OF = {
-  studio: 'studios', treatment: 'treatments', entry: 'entries', rule: 'rules', day: 'days', note: 'notes', payment: 'payments', setting: 'settings', vn: 'vns',
+  studio: 'studios', treatment: 'treatments', entry: 'entries', rule: 'rules', day: 'days', note: 'notes', payment: 'payments', setting: 'settings',
 };
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const noteId = (date, studioId) => `${date}_${studioId}`;
@@ -75,14 +74,14 @@ const byName = (a, b) => a.name.localeCompare(b.name, 'it') || (a.id < b.id ? -1
 function emptyState() {
   return {
     schemaVersion: 1, studios: [], treatments: [], entries: [], tracking: { enabled: false, dirty: [] },
-    rules: [], days: [], notes: [], payments: [], settings: [], vns: [],
+    rules: [], days: [], notes: [], payments: [], settings: [],
   };
 }
 
 const serializeData = (s) => JSON.stringify({
   schemaVersion: 1, studios: s.studios, treatments: s.treatments, entries: s.entries, tracking: s.tracking,
 });
-const serializeCal = (s) => JSON.stringify({ version: 1, rules: s.rules, days: s.days, notes: s.notes, payments: s.payments, settings: s.settings, vns: s.vns });
+const serializeCal = (s) => JSON.stringify({ version: 1, rules: s.rules, days: s.days, notes: s.notes, payments: s.payments, settings: s.settings });
 
 function nameError(name) {
   if (typeof name !== 'string') return MSG.name;
@@ -136,15 +135,7 @@ export function validateRecord(kind, r) {
     if (typeof r.studioId !== 'string' || r.studioId === '') return 'Studio non valido';
     if (typeof r.paid !== 'boolean') return 'Stato del pagamento non valido';
     if (r.bollo !== undefined && typeof r.bollo !== 'boolean') return 'Marca da bollo non valida';
-    return null;
-  }
-  if (kind === 'vn') {
-    if (!isValidISODate(r.date)) return MSG.date;
-    if (typeof r.studioId !== 'string') return 'Studio non valido';
-    if (typeof r.treatment !== 'string' || r.treatment.trim() === '' || r.treatment.length > 60) return 'Trattamento non valido';
-    if (!Number.isInteger(r.patients) || r.patients < 1 || r.patients > 999) return MSG.patients;
-    if (!Number.isInteger(r.amountCents) || r.amountCents < 0 || r.amountCents > MAX_CENTS) return MSG.amount;
-    if (r.note !== undefined && (typeof r.note !== 'string' || r.note.length > MAX_NOTE)) return MSG.note;
+    if (r.excludedCents !== undefined && (!Number.isInteger(r.excludedCents) || r.excludedCents < 0 || r.excludedCents > MAX_CENTS)) return MSG.amount;
     return null;
   }
   if (kind === 'setting') {
@@ -404,17 +395,6 @@ export function createStore(deps) {
       return;
     }
     upsert(next, 'note', id, { date, studioId, text: clean });
-  }
-
-  function vnFields(i) {
-    return {
-      date: i.date,
-      studioId: typeof i.studioId === 'string' ? i.studioId : '',
-      treatment: typeof i.treatment === 'string' ? i.treatment.trim() : i.treatment,
-      patients: i.patients,
-      amountCents: i.amountCents,
-      note: typeof i.note === 'string' ? i.note.trim() : '',
-    };
   }
 
   function ruleFields(i) {
@@ -1002,46 +982,6 @@ export function createStore(deps) {
       });
     },
 
-    // ---------- VN01: voci separate (mai lette dalle schermate principali; sync e backup sì) ----------
-    getVn({ from, to } = {}) {
-      return live(state.vns)
-        .filter((r) => (!from || r.date >= from) && (!to || r.date <= to))
-        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.createdAt - a.createdAt))
-        .map(copyRec);
-    },
-    addVn(input) {
-      const fields = vnFields(input);
-      const err = validateRecord('vn', { id: 'nuovo', createdAt: 0, updatedAt: 0, ...fields });
-      if (err) throw new ValidationError(err);
-      return mutate((next) => {
-        const t = now();
-        const rec = { id: uuid(), ...fields, createdAt: t, updatedAt: t, deleted: false };
-        next.vns.push(rec);
-        markDirty(next, 'vn', rec.id);
-        return rec.id;
-      });
-    },
-    updateVn(id, input) {
-      mutate((next) => {
-        const r = findLive(next.vns, id);
-        if (!r) throw new ValidationError(MSG.entryNotFound);
-        const fields = vnFields({ ...r, ...input });
-        const err = validateRecord('vn', { ...r, ...fields });
-        if (err) throw new ValidationError(err);
-        Object.assign(r, fields);
-        touch(next, 'vn', r);
-      });
-    },
-    deleteVn(id) {
-      return mutate((next) => {
-        const r = findLive(next.vns, id);
-        if (!r) throw new ValidationError(MSG.entryNotFound);
-        const copy = copyRec(r);
-        tombstone(next, 'vn', r);
-        return [{ kind: 'vn', data: copy }];
-      });
-    },
-
     // ---------- impostazioni dell'account (si sincronizzano e vanno nel backup) ----------
     /** Valore dell'impostazione (copia) o null. */
     getSetting(id) {
@@ -1062,7 +1002,10 @@ export function createStore(deps) {
     getPayments() {
       return live(state.payments).map(copyRec);
     },
-    /** list: [{month:'YYYY-MM', studioId, paid, bollo?}]; bollo = marca da bollo addebitata (conta solo se pagato) */
+    /**
+     * list: [{month:'YYYY-MM', studioId, paid, bollo?, excludedCents?}]; bollo = marca da bollo pagata dallo studio
+     * (conta solo se pagato); excludedCents = parte del mese da non contare nelle tasse (undefined = invariata).
+     */
     setPaid(list) {
       for (const p of list || []) {
         if (typeof p?.month !== 'string' || !MONTH_RE.test(p.month)) throw new ValidationError(MSG.month);
@@ -1070,9 +1013,12 @@ export function createStore(deps) {
       mutate((next) => {
         for (const p of list || []) {
           if (!findLive(next.studios, p.studioId)) throw new ValidationError(MSG.studioNotFound);
-          upsert(next, 'payment', paymentId(p.month, p.studioId), {
-            month: p.month, studioId: p.studioId, paid: p.paid === true, bollo: p.paid === true && p.bollo === true,
-          });
+          const fields = { month: p.month, studioId: p.studioId, paid: p.paid === true, bollo: p.paid === true && p.bollo === true };
+          if (p.excludedCents !== undefined) {
+            if (!Number.isInteger(p.excludedCents) || p.excludedCents < 0 || p.excludedCents > MAX_CENTS) throw new ValidationError(MSG.amount);
+            fields.excludedCents = p.excludedCents;
+          }
+          upsert(next, 'payment', paymentId(p.month, p.studioId), fields);
         }
       });
     },
@@ -1094,7 +1040,6 @@ export function createStore(deps) {
         notes: live(state.notes).map(copyRec),
         payments: live(state.payments).map(copyRec),
         settings: live(state.settings).map(copyRec),
-        vns: live(state.vns).map(copyRec),
       };
     },
     /**
@@ -1115,7 +1060,6 @@ export function createStore(deps) {
       if (Array.isArray(data.notes)) incoming.notes = structuredClone(data.notes);
       if (Array.isArray(data.payments)) incoming.payments = structuredClone(data.payments);
       if (Array.isArray(data.settings)) incoming.settings = structuredClone(data.settings);
-      if (Array.isArray(data.vns)) incoming.vns = structuredClone(data.vns);
       if (!next.tracking.enabled) {
         for (const arr of Object.keys(incoming)) next[arr] = incoming[arr];
         next.tracking = { enabled: false, dirty: [] };

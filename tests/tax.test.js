@@ -122,3 +122,14 @@ test('trattamenti esclusi dal calcolo: fuori dai compensi, elencati a parte, par
   assert.deepEqual(normalizeTaxParams({ excluded: ['b', 'a', 'b', '', 3] }).excluded, ['a', 'b']);
   assert.deepEqual(normalizeTaxParams({ excluded: 'x' }).excluded, []);
 });
+
+test('esclusioni mensili dagli Incassi: sommate per anno, solo valori validi', async () => {
+  const { yearPaymentExclusions } = await import('../js/tax.js');
+  const pays = [
+    { month: '2026-10', excludedCents: 20000 }, { month: '2026-11', excludedCents: 500 },
+    { month: '2025-12', excludedCents: 9999 }, { month: '2026-09', excludedCents: 100, deleted: true },
+    { month: '2026-08' }, { month: '2026-07', excludedCents: -5 },
+  ];
+  assert.equal(yearPaymentExclusions(pays, 2026), 20500);
+  assert.equal(yearPaymentExclusions(pays, 2025), 9999);
+});

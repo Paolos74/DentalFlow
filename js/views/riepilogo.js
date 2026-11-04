@@ -5,7 +5,7 @@ import {
   checkboxDialog, studioDot, showError, filesDialog, pageHeader, emptyState, iconTile, checkRow, sectionHead,
   menuChip, choiceDialog, icon, groupNote, archivedBadge, listRow,
 } from '../ui.js';
-import { formatEuro, formatPct } from '../money.js';
+import { formatEuro, formatPct, parseEuroInput, formatEuroCsv } from '../money.js';
 import {
   summarize, kpis, changeTenths, daysByStudio, yearRecap, perPatient, unpaidByStudio, paymentMonths,
 } from '../aggregate.js';
@@ -335,15 +335,18 @@ async function studioSheet(ctx, s, { range, toToday, due, duePeriod, cents }) {
 // ---------- incassi ----------
 /**
  * Foglio "Incassi": tutti i mesi dello studio con inserimenti fino a oggi, prima quelli da incassare.
- * Per i mesi oltre 77,47 € una seconda spunta, visibile solo se il mese è pagato: marca da bollo addebitata
- * (conta come ricavo nella stima delle tasse).
+ * Per i mesi oltre 77,47 € una seconda spunta, visibile solo se il mese è pagato: marca da bollo pagata dallo
+ * studio (conta come ricavo nella stima delle tasse). Sotto ogni mese un link piccolo "Escludi dalle tasse":
+ * una parte del mese che non entra nella stima delle tasse ("di cui esclusi …"), sempre modificabile.
  */
 function paymentsDialog(ctx, studio, entries) {
   const { store } = ctx;
   const payments = store.getPayments();
   const months = paymentMonths(entries, payments, studio.id);
   if (months.length === 0) { toast('Nessun inserimento per questo studio'); return; }
-  const bolloOf = new Map(payments.filter((p) => p.studioId === studio.id).map((p) => [p.month, p.bollo === true]));
+  const mine = payments.filter((p) => p.studioId === studio.id);
+  const bolloOf = new Map(mine.map((p) => [p.month, p.bollo === true]));
+  const exclOf = new Map(mine.map((p) => [p.month, Number.isInteger(p.excludedCents) ? p.excludedCents : 0]));
   const bolloText = formatEuro(tasse.taxParams(ctx).bollo);
   const rows = months.map((m) => {
     const paid = el('input', { type: 'checkbox', value: m.month, id: `pay-${m.month}`, checked: m.paid });
@@ -358,8 +361,48 @@ function paymentsDialog(ctx, studio, entries) {
     };
     paid.addEventListener('change', refresh);
     refresh();
-    const main = checkRow(paid, el('span', { text: capitalize(monthLabel(m.month)) }), el('span', { class: 'muted check-value', text: formatEuro(m.cents) }));
-    return { m, paid, bollo, nodes: [main, bolloRow].filter(Boolean) };
+
+    // esclusione dalle tasse
+    const ex = { cents: exclOf.get(m.month) || 0, error: null };
+    const ofWhich = el('span', { class: 'pay-ofwhich', id: `pay-ofwhich-${m.month}` });
+    const value = el('span', { class: 'check-value-wrap' }, el('span', { class: 'muted check-value', text: formatEuro(m.cents) }), ofWhich);
+    const main = checkRow(paid, el('span', { text: capitalize(monthLabel(m.month)) }), value);
+    const input = el('input', {
+      type: 'text', inputmode: 'decimal', id: `pay-excl-${m.month}`, placeholder: '0,00', autocomplete: 'off',
+      'aria-label': `Importo da escludere dalle tasse, ${monthLabel(m.month)}`,
+    });
+    const err = el('p', { class: 'field-error', role: 'alert', hidden: true });
+    const link = el('button', { type: 'button', class: 'btn-link pay-excl-link', id: `pay-excl-open-${m.month}` });
+    const clear = el('button', { type: 'button', class: 'btn-link pay-excl-clear', text: 'Togli' });
+    const editor = el('div', { class: 'pay-excl-editor', hidden: true },
+      el('span', { class: 'amount-input' }, input), clear, err);
+    const paint = () => {
+      ofWhich.textContent = ex.cents > 0 ? `di cui esclusi ${formatEuro(ex.cents)}` : '';
+      ofWhich.hidden = ex.cents === 0;
+      link.textContent = ex.cents > 0 ? 'Modifica esclusione' : 'Escludi dalle tasse';
+    };
+    const read = () => {
+      const t = input.value.trim();
+      const c = t === '' ? 0 : parseEuroInput(t);
+      if (c === null) ex.error = 'Importo non valido';
+      else if (c > m.cents) ex.error = `Al massimo ${formatEuro(m.cents)} (il totale del mese)`;
+      else { ex.error = null; ex.cents = c; }
+      err.textContent = ex.error || '';
+      err.hidden = !ex.error;
+      paint();
+    };
+    input.addEventListener('input', read);
+    link.addEventListener('click', () => {
+      editor.hidden = !editor.hidden;
+      if (!editor.hidden) {
+        input.value = ex.cents ? formatEuroCsv(ex.cents) : '';
+        input.focus();
+      }
+    });
+    clear.addEventListener('click', () => { input.value = ''; read(); editor.hidden = true; });
+    paint();
+    const exRow = el('div', { class: 'check pay-excl' }, link, editor);
+    return { m, paid, bollo, ex, nodes: [main, bolloRow, exRow].filter(Boolean) };
   });
   formDialog({
     title: 'Incassi',
@@ -370,8 +413,12 @@ function paymentsDialog(ctx, studio, entries) {
       el('div', { class: 'checklist', id: 'pay-list' }, rows.flatMap((r) => r.nodes)),
       el('p', { class: 'group-note', text: 'Spunta i mesi che lo studio ti ha già pagato: gli altri restano da incassare. '
         + 'Se lo studio ti ha pagato anche la marca da bollo (fatture oltre 77,47 €), spunta anche quella: conta come ricavo nelle tasse.' })),
-    onSubmit: () => {
-      store.setPaid(rows.map((r) => ({ month: r.m.month, studioId: studio.id, paid: r.paid.checked, bollo: !!r.bollo?.checked })));
+    onSubmit: ({ setFormError }) => {
+      const bad = rows.find((r) => r.ex.error);
+      if (bad) { setFormError(`${capitalize(monthLabel(bad.m.month))}: ${bad.ex.error}`); return false; }
+      store.setPaid(rows.map((r) => ({
+        month: r.m.month, studioId: studio.id, paid: r.paid.checked, bollo: !!r.bollo?.checked, excludedCents: r.ex.cents,
+      })));
       toast('Incassi aggiornati');
       return true;
     },

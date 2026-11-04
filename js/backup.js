@@ -16,7 +16,6 @@ const OPTIONAL_INFO = [
   ['notes', 'note', 'una nota', 'note'],
   ['payments', 'payment', 'un incasso', 'incassi'],
   ['settings', 'setting', 'un\'impostazione', 'impostazioni'],
-  ['vns', 'vn', 'una voce VN01', 'voci VN01'],
 ];
 
 export function buildBackup(data, exportedAt = new Date().toISOString()) {
@@ -33,7 +32,6 @@ export function buildBackup(data, exportedAt = new Date().toISOString()) {
   if (data.notes) out.notes = strip(data.notes);
   if (data.payments) out.payments = strip(data.payments);
   if (data.settings) out.settings = strip(data.settings);
-  if (data.vns) out.vns = strip(data.vns);
   return out;
 }
 
@@ -74,12 +72,11 @@ export function validateBackup(obj) {
   }
   if (obj.calendar !== undefined && !isObj(obj.calendar)) return fail('Backup non valido: calendario non riconosciuto');
   const sources = {
-    rules: obj.calendar?.rules, days: obj.calendar?.days, notes: obj.notes, payments: obj.payments, settings: obj.settings, vns: obj.vns,
+    rules: obj.calendar?.rules, days: obj.calendar?.days, notes: obj.notes, payments: obj.payments, settings: obj.settings,
   };
   const present = {
     rules: obj.calendar !== undefined, days: obj.calendar !== undefined, notes: obj.notes !== undefined, payments: obj.payments !== undefined,
     settings: obj.settings !== undefined,
-    vns: obj.vns !== undefined,
   };
   for (const [arr, kind, label, plural] of OPTIONAL_INFO) {
     if (!present[arr]) continue;

@@ -78,6 +78,16 @@ export function yearExcluded(entries, year, excluded = []) {
   return out;
 }
 
+/** Somme escluse a mano dai mesi dell'anno (Incassi → "Escludi spesa"), in centesimi. */
+export function yearPaymentExclusions(payments, year) {
+  const y = String(year);
+  let cents = 0;
+  for (const p of payments || []) {
+    if (!p.deleted && p.month.slice(0, 4) === y && Number.isInteger(p.excludedCents) && p.excludedCents > 0) cents += p.excludedCents;
+  }
+  return cents;
+}
+
 /** Marche da bollo addebitate nell'anno: mesi pagati con la spunta "bollo". */
 export function yearBolli(payments, year) {
   const y = String(year);

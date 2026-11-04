@@ -1428,10 +1428,12 @@ textarea.auto-grow { resize: none; overflow: hidden; min-height: 76px; }
 /* Incassi: spunta della marca da bollo sotto il mese pagato */
 .check.check-bollo { padding-left: 44px; min-height: 40px; }
 .check.check-bollo .check-sub { color: var(--text-2); font-size: .875rem; }
-/* VN01 */
-#res-page .kpi-grid { grid-template-columns: repeat(3, 1fr); }
-#res-page .kpi:first-child { grid-column: auto; padding: 12px; }
-#res-page .kpi-value, #res-page .kpi:first-child .kpi-value { font-family: inherit; font-weight: 700; font-size: 1.125rem; white-space: nowrap; overflow-wrap: normal; }
-#res-add { margin: 0 0 16px; }
-.res-empty { margin: 0 4px 16px; }
-.res-actions { margin: 12px 0 24px; }
+/* Incassi: "di cui esclusi" sotto l'importo e link discreto "Escludi dalle tasse" */
+.check-value-wrap { display: grid; justify-items: end; gap: 1px; margin-left: auto; text-align: right; }
+.pay-ofwhich { font-size: .8125rem; color: var(--text-2); }
+.check.pay-excl { display: grid; gap: 6px; padding: 0 16px 10px 44px; min-height: 0; }
+.pay-excl-link { justify-self: start; font-size: .8125rem; color: var(--text-2); font-weight: 500; padding: 4px 0; min-height: 32px; }
+.pay-excl-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pay-excl-editor .amount-input { width: 120px; }
+.pay-excl-editor .field-error { flex-basis: 100%; margin: 0; }
+.pay-excl-clear { font-size: .875rem; color: var(--danger); min-height: 32px; }

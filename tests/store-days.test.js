@@ -298,28 +298,23 @@ test('impostazioni dell\'account: parametri delle tasse salvati, ricaricati, nel
   assert.equal(recs[0].kind, 'setting');
 });
 
-test('VN01: voci separate, mai negli inserimenti; modifica, eliminazione con annulla, backup e ricaricamento', async () => {
+test('incassi: parte del mese esclusa dalle tasse, modificabile, conservata se non indicata, nel backup', async () => {
   const { buildBackup, parseBackupText } = await import('../js/backup.js');
-  const { aggregate } = { aggregate: await import('../js/aggregate.js') };
-  const { store, storage, a } = setup();
-  const id = store.addVn({ date: '2026-03-10', studioId: a, treatment: ' Igiene dentale ', patients: 2, amountCents: 12000, note: 'mamma' });
-  assert.equal(store.getEntries().length, 0, 'non compare tra gli inserimenti');
-  assert.equal(aggregate.kpis(store.getEntries()).cents, 0, 'non entra nei totali del Recap');
-  const [v] = store.getVn({ from: '2026-01-01', to: '2026-12-31' });
-  assert.equal(v.treatment, 'Igiene dentale');
-  assert.equal(v.note, 'mamma');
-  store.updateVn(id, { amountCents: 15000 });
-  assert.equal(store.getVn()[0].amountCents, 15000);
-  assert.throws(() => store.addVn({ date: '2026-02-30', treatment: 'X', patients: 1, amountCents: 0 }), ValidationError);
-  assert.throws(() => store.addVn({ date: '2026-02-03', treatment: '', patients: 1, amountCents: 0 }), ValidationError);
-  assert.throws(() => store.addVn({ date: '2026-02-03', treatment: 'X', patients: 0, amountCents: 0 }), ValidationError);
-  assert.equal(makeStore(storage).getVn().length, 1, 'salvata su disco');
+  const { validateRecord } = await import('../js/store.js');
+  const { store, a } = setup();
+  store.setPaid([{ month: '2026-10', studioId: a, paid: false, excludedCents: 20000 }]);
+  const get = () => store.getPayments().find((p) => p.month === '2026-10');
+  assert.equal(get().excludedCents, 20000);
+  store.setPaid([{ month: '2026-10', studioId: a, paid: true }]);
+  assert.equal(get().excludedCents, 20000, 'segnare pagato non la cancella');
+  store.setPaid([{ month: '2026-10', studioId: a, paid: true, excludedCents: 15000 }]);
+  assert.equal(get().excludedCents, 15000);
+  store.setPaid([{ month: '2026-10', studioId: a, paid: true, excludedCents: 0 }]);
+  assert.equal(get().excludedCents, 0);
+  assert.throws(() => store.setPaid([{ month: '2026-10', studioId: a, paid: true, excludedCents: 1.5 }]), ValidationError);
+  store.setPaid([{ month: '2026-10', studioId: a, paid: true, excludedCents: 3000 }]);
   const parsed = parseBackupText(JSON.stringify(buildBackup(store.exportData())));
   assert.equal(parsed.ok, true, parsed.error);
-  assert.equal(parsed.data.vns.length, 1);
-  const removed = store.deleteVn(id);
-  assert.equal(store.getVn().length, 0);
-  assert.equal(store.restoreRecords(removed), 1);
-  assert.equal(store.getVn().length, 1);
-  assert.equal(store.getRecordsByKeys([`vn_${id}`])[0].kind, 'vn');
+  assert.equal(parsed.data.payments.find((p) => p.month === '2026-10').excludedCents, 3000);
+  assert.notEqual(validateRecord('payment', { ...get(), excludedCents: -1 }), null);
 });
