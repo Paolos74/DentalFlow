@@ -9,7 +9,7 @@ import { formatEuro, formatPct, parseEuroInput, formatEuroCsv } from '../money.j
 import { todayISO, formatLong } from '../dates.js';
 import {
   forfettario, scadenze, yearCompensi, yearBolli, normalizeTaxParams, TAX_DEFAULTS, TAX_LIMITS,
-  FORFETTARIO_SOGLIA, lastStartupYear, yearPaymentExclusions,
+  FORFETTARIO_SOGLIA, lastStartupYear, yearPaymentExclusions, fixedShare, declaredFor,
 } from '../tax.js';
 import { isValidISODate, formatDateShort } from '../dates.js';
 
@@ -52,6 +52,9 @@ export function renderInto(container, ctx) {
   const prev = estimateFor(store, params, year - 1);
   const ongoing = year === thisYear;
   const months = ongoing ? Number(today.slice(5, 7)) : 12;
+  // percentuale fissa scelta nei Parametri: vale per i numeri in alto; il calcolo con le regole resta sotto, per confronto
+  const fixed = fixedShare(s, params);
+  const shown = fixed || { totale: s.totale, netto: s.netto, shareTenths: s.shareTenths };
 
   // anno: ‹ 2026 ›
   container.append(el('div', { class: 'filterbar' }, el('div', { class: 'period-nav' }, el('div', { class: 'stepper-nav' },
@@ -81,14 +84,15 @@ export function renderInto(container, ctx) {
     sectionHead(ongoing ? `${year} · dati fino a oggi` : `${year}`),
     el('div', { class: 'kpi-grid' },
       el('div', { class: 'kpi', id: 'tax-kpi-netto' }, el('span', { class: 'kpi-label', text: 'Netto stimato' }),
-        el('strong', { class: 'kpi-value', text: formatEuro(s.netto) })),
+        el('strong', { class: 'kpi-value', text: formatEuro(shown.netto) })),
       el('div', { class: 'kpi', id: 'tax-kpi-totale' }, el('span', { class: 'kpi-label', text: 'Tasse e contributi' }),
-        el('strong', { class: 'kpi-value', text: formatEuro(s.totale) })),
+        el('strong', { class: 'kpi-value', text: formatEuro(shown.totale) })),
       el('div', { class: 'kpi', id: 'tax-kpi-share' }, el('span', { class: 'kpi-label', text: 'Da mettere da parte' }),
-        el('strong', { class: 'kpi-value', text: formatPct(s.shareTenths) }),
-        el('span', { class: 'kpi-change', text: `${formatEuro(Math.round(s.totale / months))} al mese` }))),
-    el('p', { class: 'kpi-note', id: 'tax-share-note', text: `Di ogni euro incassato metti da parte ${formatPct(s.shareTenths)}: `
-      + `in media ${formatEuro(Math.round(s.totale / months))} al mese${ongoing ? ` (su ${months} ${months === 1 ? 'mese' : 'mesi'} del ${year})` : ''}.` })));
+        el('strong', { class: 'kpi-value', text: formatPct(shown.shareTenths) }),
+        el('span', { class: 'kpi-change', text: `${formatEuro(Math.round(shown.totale / months))} al mese` }))),
+    el('p', { class: 'kpi-note', id: 'tax-share-note', text: `Di ogni euro incassato metti da parte ${formatPct(shown.shareTenths)}: `
+      + `in media ${formatEuro(Math.round(shown.totale / months))} al mese${ongoing ? ` (su ${months} ${months === 1 ? 'mese' : 'mesi'} del ${year})` : ''}.` }),
+    fixed ? el('p', { class: 'kpi-note', id: 'tax-fixed-note', text: `Percentuale scelta da te nei Parametri. Con le regole del forfettario risulta ${formatPct(s.shareTenths)} (${formatEuro(s.totale)}): il dettaglio è qui sotto.` }) : null));
 
   // calcolo passo per passo
   const ul = el('ul', { class: 'list tax-lines', id: 'tax-calc' },
@@ -105,10 +109,12 @@ export function renderInto(container, ctx) {
     }),
     line('Netto', formatEuro(s.netto), { strong: true, id: 'tax-netto' }));
   container.append(el('section', { class: 'card', id: 'tax-calc-card' },
-    el('div', { class: 'card-head' }, iconTile('euro', 'green'), el('h3', { text: 'Calcolo (regime forfettario)' })), ul));
+    el('div', { class: 'card-head' }, iconTile('euro', 'green'), el('h3', { text: fixed ? 'Calcolo con le regole (per confronto)' : 'Calcolo (regime forfettario)' })), ul));
 
   // scadenze dell'anno dopo
-  const sc = scadenze(year, s, prev);
+  // acconti già versati per l'anno: dalle tasse vere dell'anno prima se inserite, altrimenti dalla stima
+  const declaredPrev = declaredFor(params, year - 1);
+  const sc = scadenze(year, s, declaredPrev || prev);
   const due = (d) => formatLong(d.date);
   const june = el('ul', { class: 'list tax-lines', id: 'tax-june' },
     line(sc.giugno.saldoImposta < 0 ? `Credito imposta ${year}` : `Saldo imposta ${year}`, formatEuro(Math.abs(sc.giugno.saldoImposta))),
@@ -123,12 +129,22 @@ export function renderInto(container, ctx) {
   const versati = sc.versati.imposta + sc.versati.contributi;
   container.append(el('section', { class: 'card', id: 'tax-due' },
     el('div', { class: 'card-head' }, iconTile('calendar', 'red'), el('h3', { text: `Scadenze ${year + 1}` })),
+    fixed ? groupNote('Calcolate con le regole del forfettario, non con la percentuale fissa.') : null,
     el('h4', { class: 'group-title', text: capitalizeFirst(due(sc.giugno)) }), june,
     sc.giugno.credito ? groupNote(`Credito di ${formatEuro(sc.giugno.credito)} da usare in compensazione.`) : null,
     el('h4', { class: 'group-title', text: capitalizeFirst(due(sc.novembre)) }), nov,
-    groupNote(versati
-      ? `Acconti già versati per il ${year}: ${formatEuro(versati)}, calcolati dai dati del ${year - 1} nell'app.`
-      : `Nessun acconto versato per il ${year}: nell'app non ci sono dati del ${year - 1}. Se li hai versati, il saldo di giugno sarà più basso.`)));
+    groupNote(declaredPrev
+      ? `Acconti già versati per il ${year}: ${formatEuro(versati)}, calcolati dalle tasse del ${year - 1} che hai inserito.`
+      : versati
+        ? `Acconti già versati per il ${year}: ${formatEuro(versati)}, stimati dai dati del ${year - 1} nell'app.`
+        : `Nessun acconto versato per il ${year}: nell'app non ci sono dati del ${year - 1}. Se li hai versati, inserisci qui sotto le tasse del ${year - 1}.`),
+    el('ul', { class: 'list grouped', id: 'tax-declared' }, listRow({
+      id: 'tax-declared-open', title: `Tasse del ${year - 1}`, lead: iconTile('note', 'gray'),
+      subtitle: declaredPrev
+        ? `Imposta ${formatEuro(declaredPrev.imposta)} · contributi ${formatEuro(declaredPrev.contributi)}`
+        : 'Inserisci quelle vere (dichiarazione o F24)',
+      onClick: () => declaredDialog(ctx, params, year - 1),
+    }))));
 
   container.append(paramsCard(ctx, params));
   container.append(el('p', { class: 'hint tax-disclaimer', id: 'tax-disclaimer', text:
@@ -138,6 +154,43 @@ export function renderInto(container, ctx) {
 }
 
 const capitalizeFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** Foglio "Tasse del YYYY": imposta sostitutiva e contributi INPS dovuti per quell'anno (valori veri). */
+function declaredDialog(ctx, params, year) {
+  const cur = params.declared[String(year)] || null;
+  const mk = (id, v) => el('input', { type: 'text', id, inputmode: 'decimal', autocomplete: 'off', placeholder: '0,00', value: v !== undefined && v !== null ? formatEuroCsv(v) : '' });
+  const imp = mk('tax-d-imposta', cur?.imposta);
+  const con = mk('tax-d-contributi', cur?.contributi);
+  const fImp = groupRow('Imposta sostitutiva (€)', imp);
+  const fCon = groupRow('Contributi INPS (€)', con);
+  const save = (declared) => {
+    ctx.store.setSetting('tax', { ...params, declared });
+    ctx.prefs.set({ tax: null });
+    ctx.rerender();
+  };
+  formDialog({
+    title: `Tasse del ${year}`,
+    build: (form) => form.append(
+      formGroup(fImp.wrap, fCon.wrap),
+      groupNote(`Gli importi dovuti per il ${year} (saldo + acconti), dalla dichiarazione dei redditi o dagli F24. `
+        + `Servono a calcolare gli acconti già versati nel ${year + 1}: 100 % dell'imposta e 80 % dei contributi.`)),
+    extraAction: cur ? {
+      label: 'Togli i valori inseriti', kind: 'danger',
+      onClick: () => { const d = { ...params.declared }; delete d[String(year)]; save(d); toast('Valori tolti: torna la stima'); },
+    } : undefined,
+    onSubmit: () => {
+      fImp.setError(''); fCon.setError('');
+      const i = imp.value.trim() === '' ? 0 : parseEuroInput(imp.value);
+      const c = con.value.trim() === '' ? 0 : parseEuroInput(con.value);
+      if (i === null) { fImp.setError('Importo non valido'); return false; }
+      if (c === null) { fCon.setError('Importo non valido'); return false; }
+      if (i === 0 && c === 0) { fImp.setError('Inserisci almeno un importo'); return false; }
+      save({ ...params.declared, [String(year)]: { imposta: i, contributi: c } });
+      toast(`Tasse del ${year} salvate`);
+      return true;
+    },
+  });
+}
 
 /** "5 % fino al 2028, poi 15 %" con la data di apertura; null senza. */
 function rateNote(params, year) {
@@ -157,7 +210,7 @@ function paramsCard(ctx, params) {
   return el('ul', { class: 'list grouped', id: 'tax-params' },
     listRow({
       id: 'tax-params-open', title: 'Parametri', lead: iconTile('appearance', 'gray'),
-      subtitle: `${custom ? 'Personalizzati · ' : ''}coefficiente ${pctText(params.coeff)} · INPS ${pctText(params.inps)} · ${rateSummary(params)} · bollo ${formatEuro(params.bollo)}`,
+      subtitle: `${custom ? 'Personalizzati · ' : ''}coefficiente ${pctText(params.coeff)} · INPS ${pctText(params.inps)} · ${rateSummary(params)} · bollo ${formatEuro(params.bollo)}${params.fixedPct ? ` · da parte ${pctText(params.fixedPct)} fisso` : ''}`,
       onClick: () => paramsDialog(ctx, params),
     }));
 }
@@ -188,12 +241,16 @@ function paramsDialog(ctx, params) {
   };
   open.addEventListener('input', refresh);
   open.addEventListener('change', refresh);
+  const fixedIn = el('input', { type: 'text', id: 'tax-p-fixed', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Automatica', value: params.fixedPct ? formatEuroCsv(params.fixedPct).replace(/,00$/, '') : '' });
+  const fFixed = groupRow('Da mettere da parte (%)', fixedIn);
   const fCoeff = groupRow('Coefficiente (%)', coeff);
   const fBollo = groupRow('Marca da bollo (€)', bollo);
   formDialog({
     title: 'Parametri delle tasse',
     build: (form) => {
       form.append(
+      formGroup(fFixed.wrap),
+      groupNote('Vuoto = calcolata con le regole del forfettario. Scrivi un numero (es. 32) per usare una percentuale fissa dei ricavi.'),
       formGroup(fOpen.wrap, fRate.wrap), auto, el('div', { class: 'toolbar' }, clearOpen),
       formGroup(fCoeff.wrap, groupRow('Contributi INPS', inps).wrap, fBollo.wrap),
       groupNote('Valori 2026 per igienista dentale in forfettario: coefficiente 78 % (ATECO 86.99.09), Gestione Separata 26,07 %, imposta 5 % nell\'anno di apertura e nei 4 successivi (se hai i requisiti), poi 15 %, marca da bollo 2 €. Si salvano nel tuo account: valgono su tutti i dispositivi sincronizzati e nel backup.'),
@@ -201,20 +258,22 @@ function paramsDialog(ctx, params) {
         type: 'button', class: 'btn btn-small btn-secondary', id: 'tax-p-reset', text: 'Ripristina i valori predefiniti',
         onclick: () => {
           coeff.value = formatEuroCsv(TAX_DEFAULTS.coeff); inps.value = String(TAX_DEFAULTS.inps);
-          rate.value = String(TAX_DEFAULTS.rate); bollo.value = formatEuroCsv(TAX_DEFAULTS.bollo);
+          rate.value = String(TAX_DEFAULTS.rate); bollo.value = formatEuroCsv(TAX_DEFAULTS.bollo); fixedIn.value = '';
           refresh(); // la data di apertura resta: è un dato tuo, non un parametro di legge
         },
       })));
       refresh();
     },
     onSubmit: () => {
-      fCoeff.setError(''); fBollo.setError(''); fOpen.setError('');
+      fCoeff.setError(''); fBollo.setError(''); fOpen.setError(''); fFixed.setError('');
+      const fx = fixedIn.value.trim() === '' ? null : parseEuroInput(fixedIn.value);
+      if (fixedIn.value.trim() !== '' && (fx === null || fx < 1 || fx > 9000)) { fFixed.setError('Percentuale non valida (da 0,01 a 90)'); return false; }
       if (open.value && !isValidISODate(open.value)) { fOpen.setError('Data non valida'); return false; }
       const c = parseEuroInput(coeff.value);
       const b = parseEuroInput(bollo.value);
       if (c === null || c < TAX_LIMITS.coeff[0] || c > TAX_LIMITS.coeff[1]) { fCoeff.setError('Coefficiente non valido (1–100 %)'); return false; }
       if (b === null || b > TAX_LIMITS.bollo[1]) { fBollo.setError('Importo non valido'); return false; }
-      const next = { coeff: c, inps: Number(inps.value), rate: Number(rate.value), bollo: b, openDate: open.value || null,
+      const next = { coeff: c, inps: Number(inps.value), rate: Number(rate.value), bollo: b, openDate: open.value || null, fixedPct: fx, declared: params.declared,
       };
       ctx.store.setSetting('tax', next); // errori di salvataggio: messaggio nel foglio (formDialog)
       ctx.prefs.set({ tax: null }); // la copia sul dispositivo (v11) non serve più

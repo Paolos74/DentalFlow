@@ -13,7 +13,10 @@
 
 // imposta predefinita 5 % (scelta dell'utente: primi 5 anni di attività)
 // excluded: id dei trattamenti esclusi dal calcolo (es. compensi non da partita IVA); sempre visibili in Tasse
-export const TAX_DEFAULTS = Object.freeze({ coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null, excluded: Object.freeze([]) });
+// fixedPct: percentuale fissa dei ricavi da mettere da parte, scelta dall'utente (null = calcolo con le regole)
+// declared: tasse vere di un anno inserite dall'utente { 'YYYY': { imposta, contributi } } (centesimi):
+//           per l'anno dopo sostituiscono la stima nel calcolo degli acconti già versati
+export const TAX_DEFAULTS = Object.freeze({ coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null, excluded: Object.freeze([]), fixedPct: null, declared: Object.freeze({}) });
 export const RATE_STARTUP = 500;
 export const RATE_STANDARD = 1500;
 export const STARTUP_YEARS = 5;
@@ -31,7 +34,7 @@ const pct = (cents, bp) => Math.round((cents * bp) / 10000);
 
 /** Parametri validi (interi nei limiti), con i valori predefiniti al posto di quelli mancanti o errati. */
 export function normalizeTaxParams(p) {
-  const out = { ...TAX_DEFAULTS, excluded: [] };
+  const out = { ...TAX_DEFAULTS, excluded: [], declared: {} };
   if (p && typeof p === 'object') {
     if (Array.isArray(p.excluded)) out.excluded = [...new Set(p.excluded.filter((x) => typeof x === 'string' && x !== ''))].sort().slice(0, 500);
     for (const [k, [min, max]] of Object.entries(TAX_LIMITS)) {
@@ -39,6 +42,13 @@ export function normalizeTaxParams(p) {
       if (Number.isInteger(v) && v >= min && v <= max) out[k] = v;
     }
     if (typeof p.openDate === 'string' && ISO_RE.test(p.openDate)) out.openDate = p.openDate;
+    if (Number.isInteger(p.fixedPct) && p.fixedPct >= 1 && p.fixedPct <= 9000) out.fixedPct = p.fixedPct;
+    if (p.declared && typeof p.declared === 'object' && !Array.isArray(p.declared)) {
+      const okC = (v) => Number.isInteger(v) && v >= 0 && v <= 100000000;
+      for (const [y, v] of Object.entries(p.declared)) {
+        if (/^(19|20)\d\d$/.test(y) && v && okC(v.imposta) && okC(v.contributi)) out.declared[y] = { imposta: v.imposta, contributi: v.contributi };
+      }
+    }
   }
   return out;
 }
@@ -114,6 +124,19 @@ export function forfettario({ compensiCents, bolli = 0, params, year }) {
     onRedditoTenths: reddito > 0 ? Math.round((totale * 1000) / reddito) : 0,
     soglia: ricavi > FORFETTARIO_USCITA ? 'uscita' : ricavi > FORFETTARIO_SOGLIA ? 'superata' : null,
   };
+}
+
+/** Tasse vere di un anno inserite dall'utente ({imposta, contributi} in centesimi) o null. */
+export function declaredFor(params, year) {
+  return normalizeTaxParams(params).declared[String(year)] || null;
+}
+
+/** Con la percentuale fissa: quanto mettere da parte e netto (in centesimi), oppure null senza percentuale fissa. */
+export function fixedShare(stima, params) {
+  const p = normalizeTaxParams(params);
+  if (p.fixedPct === null) return null;
+  const totale = pct(stima.ricavi, p.fixedPct);
+  return { pct: p.fixedPct, totale, netto: stima.ricavi - totale, shareTenths: Math.round(p.fixedPct / 10) };
 }
 
 /** Acconti dovuti per l'anno successivo a partire dalla stima di un anno: {imposta:[giugno, novembre], contributi:[…]}. */

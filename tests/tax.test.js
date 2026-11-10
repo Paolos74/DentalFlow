@@ -88,7 +88,7 @@ test('compensi e marche da bollo dell\'anno', () => {
 });
 
 test('parametri: valori fuori limite tornano ai predefiniti', () => {
-  assert.deepEqual(normalizeTaxParams({ coeff: 7800, inps: 99999, rate: 500, bollo: -1, openDate: '2026-13-01' }), { coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null, excluded: [] });
+  assert.deepEqual(normalizeTaxParams({ coeff: 7800, inps: 99999, rate: 500, bollo: -1, openDate: '2026-13-01' }), { coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null, excluded: [], fixedPct: null, declared: {} });
   assert.deepEqual(normalizeTaxParams(null), { ...TAX_DEFAULTS, excluded: [] });
 });
 
@@ -132,4 +132,30 @@ test('esclusioni mensili dagli Incassi: sommate per anno, solo valori validi', a
   ];
   assert.equal(yearPaymentExclusions(pays, 2026), 20500);
   assert.equal(yearPaymentExclusions(pays, 2025), 9999);
+});
+
+test('percentuale fissa da mettere da parte: sostituisce il calcolo nei numeri principali', async () => {
+  const { fixedShare } = await import('../js/tax.js');
+  const s = forfettario({ compensiCents: 3000000 });
+  assert.equal(fixedShare(s, TAX_DEFAULTS), null);
+  const f = fixedShare(s, { ...TAX_DEFAULTS, fixedPct: 3200 });
+  assert.deepEqual(f, { pct: 3200, totale: 960000, netto: 2040000, shareTenths: 320 });
+  assert.equal(normalizeTaxParams({ fixedPct: 0 }).fixedPct, null);
+  assert.equal(normalizeTaxParams({ fixedPct: 9500 }).fixedPct, null);
+  assert.equal(normalizeTaxParams({ fixedPct: 3250 }).fixedPct, 3250);
+});
+
+test('tasse vere dell\'anno prima: sostituiscono la stima negli acconti versati', async () => {
+  const { declaredFor } = await import('../js/tax.js');
+  const p = normalizeTaxParams({ declared: { 2025: { imposta: 50000, contributi: 600000 }, 1800: { imposta: 1, contributi: 1 }, 2024: { imposta: -1, contributi: 0 } } });
+  assert.deepEqual(Object.keys(p.declared), ['2025']);
+  assert.deepEqual(declaredFor(p, 2025), { imposta: 50000, contributi: 600000 });
+  assert.equal(declaredFor(p, 2026), null);
+  const s = forfettario({ compensiCents: 3000000, params: p, year: 2026 });
+  const sc = scadenze(2026, s, declaredFor(p, 2025));
+  // acconti 2026 dalle tasse 2025: imposta 500 € → 40 % + 60 %, contributi 80 % di 6.000 €
+  assert.equal(sc.versati.imposta, 50000);
+  assert.equal(sc.versati.contributi, 480000);
+  assert.equal(sc.giugno.saldoImposta, s.imposta - 50000);
+  assert.equal(sc.giugno.saldoContributi, s.contributi - 480000);
 });
